@@ -18,7 +18,7 @@ sign-in. You are responsible for using it as Anthropic's terms
 
 | Path | Tested | How |
 |---|---|---|
-| Docker | 2026-10-15 | The image, started with `docker run`: first start without network, both CLIs installed, Jodd's own setup code connecting and finding both CLIs, `lock` / `unlock`, and recreating the container (fingerprint, installed CLIs and lock kept). The `compose.yaml` file itself has not been run end to end yet, and the image has not been published yet. |
+| Docker | 2026-10-15 | The image, started with `docker run`: first start without network, both CLIs installed, Jodd's own setup code connecting and finding both CLIs, `lock` / `unlock`, and recreating the container (fingerprint, installed CLIs and lock kept). The `compose.yaml` file itself has not been run end to end yet. |
 | Ubuntu 24.04, Debian 12, Fedora, Alpine | 2026-10-15 | The installer in clean containers: real CLIs installed, real password logins, Jodd's own setup code connecting and finding both CLIs, a server whose sshd already turned password login off for everyone (every other account kept its settings), re-runs that change nothing. Starting sshd through systemd or OpenRC was not part of these tests. |
 | macOS | 2026-10-15 | One Apple Silicon Mac on macOS 27 (OpenSSH 10.3): a new account created, the Remote Login allow-list limited to `jodd-ai`, both CLIs installed, Jodd's own setup code connecting with the password and finding both CLIs, the fingerprint matching what sshd serves, `lock`, and a re-run on the existing account that moved it into a group of its own. macOS 13–26, Intel Macs, `--no-sleep` and the removal steps were not tested. |
 
