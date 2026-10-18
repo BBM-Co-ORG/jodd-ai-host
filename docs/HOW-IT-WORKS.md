@@ -10,7 +10,17 @@ to it yourself. Jodd never sees that sign-in and never offers one of its own.
 You are responsible for using the CLI as Anthropic's terms
 ([consumer](https://www.anthropic.com/legal/consumer-terms),
 [commercial](https://www.anthropic.com/legal/commercial-terms)) or
-[OpenAI's terms](https://openai.com/policies/terms-of-use) allow.
+OpenAI's [consumer terms](https://openai.com/policies/terms-of-use) or
+[business agreement](https://openai.com/policies/services-agreement/) allow.
+
+**Scope and provider terms.** This setup is for one person using their own
+provider account across their own devices. SSH connectivity and successful
+sign-in do not establish permission for every app integration. Jodd submits
+headless requests from its note features; it is more than a remote terminal.
+Do not share a personal subscription, pool accounts, or resell access. Separate
+OS accounts alone do not authorize a multi-user service. Account type,
+authentication method, provider policies and any required provider agreement
+still apply.
 
 ## The parts
 
