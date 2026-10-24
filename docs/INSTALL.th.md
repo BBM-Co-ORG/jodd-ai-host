@@ -528,7 +528,7 @@ ipconfig getifaddr en0
 ([Docker](#docker))
 
 **อย่า forward พอร์ต SSH บนเราเตอร์** การเข้าสู่ระบบด้วยรหัสผ่านจะเปิดอยู่ระหว่าง
-Setup และ Update และพอร์ต SSH บนอินเทอร์เน็ตถูกสแกนตลอดทั้งวัน
+Setup, Change server และ Reinstall helper และพอร์ต SSH บนอินเทอร์เน็ตถูกสแกนตลอดทั้งวัน
 
 ## <a id="check-the-fingerprint"></a>ตรวจ fingerprint
 
@@ -563,7 +563,7 @@ fingerprint จะคงเดิมเมื่อคุณรันตัว�
 sudo jodd-ai-host lock
 ```
 
-ก่อนกด **Update** ใน Jodd ให้เปิดกลับมาก่อน แล้วปิดอีกครั้งหลังเสร็จ:
+ก่อนกด **Reinstall helper** ใน Jodd ให้เปิดกลับมาก่อน แล้วปิดอีกครั้งหลังเสร็จ:
 
 ```sh
 sudo jodd-ai-host unlock
@@ -613,7 +613,7 @@ sudo jodd-ai-host update-clis
 docker compose exec ai-host jodd-ai-host update-clis
 ```
 
-ถ้า CLI ตัวใดยังไม่ได้ติดตั้งตอนที่คุณตั้งค่า Jodd ให้กด **Update** ใน Jodd
+ถ้า CLI ตัวใดยังไม่ได้ติดตั้งตอนที่คุณตั้งค่า Jodd ให้กด **Reinstall helper** ใน Jodd
 หลังติดตั้งแล้ว (โดยเปิดการเข้าสู่ระบบด้วยรหัสผ่านไว้) เพื่อให้ Jodd รู้ว่า CLI อยู่ที่ไหน
 
 **ชุดติดตั้งบน Linux และ macOS** ดาวน์โหลดตัวติดตั้งใหม่แล้วรัน ตัวติดตั้งจะเก็บบัญชี รหัสผ่าน การลงชื่อเข้าใช้ของคุณ key ของ Jodd และสถานะ lock ไว้เหมือนเดิม
@@ -630,9 +630,9 @@ docker compose up -d
 
 fingerprint, CLI, การลงชื่อเข้าใช้ของคุณ, key ของ Jodd และสถานะ lock ยังอยู่ครบ เพราะเก็บไว้ใน volume ทั้งสอง
 รหัสผ่านจาก `.env` จะถูกนำไปใช้อีกครั้ง ถ้าไม่มี container ใหม่จะสร้างรหัสผ่านใหม่และแสดงใน `docker compose logs` ซึ่งคุณต้องใช้เฉพาะตอน
-Setup หรือ Update ครั้งถัดไปใน Jodd
+Setup, Change server หรือ Reinstall helper ครั้งถัดไปใน Jodd
 
-**ส่วนของ Jodd บนเครื่อง host** เมื่อ Jodd บอกว่าเครื่อง host ต้องอัปเดต ให้เปิดการเข้าสู่ระบบด้วยรหัสผ่าน กด **Update** ใน Jodd แล้ว lock อีกครั้ง
+**ส่วนของ Jodd บนเครื่อง host** เมื่อ Jodd บอกว่าเครื่อง host ต้องอัปเดต ให้เปิดการเข้าสู่ระบบด้วยรหัสผ่าน กด **Reinstall helper** ใน Jodd แล้ว lock อีกครั้ง
 
 ## <a id="remove-everything"></a>ลบทุกอย่างออก
 
@@ -702,11 +702,11 @@ sudo jodd-ai-host status
 
 | อาการ | สิ่งที่ต้องรัน |
 |---|---|
-| CLI แสดงว่า **not installed** ใน Jodd หรือ Jodd บอกว่ายังไม่ได้ติดตั้ง | `sudo jodd-ai-host update-clis` จากนั้น `unlock`, กด **Update** ใน Jodd แล้ว `lock` |
+| CLI แสดงว่า **not installed** ใน Jodd หรือ Jodd บอกว่ายังไม่ได้ติดตั้ง | `sudo jodd-ai-host update-clis` จากนั้น `unlock`, กด **Reinstall helper** ใน Jodd แล้ว `lock` |
 | ติดตั้ง CLI ไม่สำเร็จ (ไม่มีอินเทอร์เน็ตระหว่างติดตั้ง) | `sudo jodd-ai-host update-clis` |
 | **Test connection** ใน Jodd บอกว่า Claude Code ยังไม่ได้ลงชื่อเข้าใช้ | `sudo jodd-ai-host signin claude` |
 | Codex ตอบกลับเป็นข้อผิดพลาดเรื่องการลงชื่อเข้าใช้หรือการอนุญาต | `sudo jodd-ai-host signin codex` |
-| Jodd บอกว่าเซิร์ฟเวอร์ไม่รับการลงชื่อเข้าใช้ด้วยรหัสผ่าน | การเข้าสู่ระบบด้วยรหัสผ่านถูก lock อยู่: `sudo jodd-ai-host unlock` (lock อีกครั้งหลัง Setup หรือ Update) ถ้าไม่ได้ lock ไว้ `/etc/ssh/sshd_config` อาจมี `AuthenticationMethods publickey` ที่ใช้กับทุกบัญชี: `sudo jodd-ai-host doctor` จะบอกชื่อค่าที่ต้องแก้ |
+| Jodd บอกว่าเซิร์ฟเวอร์ไม่รับการลงชื่อเข้าใช้ด้วยรหัสผ่าน | การเข้าสู่ระบบด้วยรหัสผ่านถูก lock อยู่: `sudo jodd-ai-host unlock` (lock อีกครั้งหลัง Setup, Change server หรือ Reinstall helper) ถ้าไม่ได้ lock ไว้ `/etc/ssh/sshd_config` อาจมี `AuthenticationMethods publickey` ที่ใช้กับทุกบัญชี: `sudo jodd-ai-host doctor` จะบอกชื่อค่าที่ต้องแก้ |
 | Jodd บอกว่าเซิร์ฟเวอร์ปฏิเสธชื่อผู้ใช้หรือรหัสผ่าน | ตรวจว่าชื่อผู้ใช้คือ `jodd-ai` และตั้งรหัสผ่านใหม่ด้วย `sudo jodd-ai-host password` ถ้ารหัสผ่านถูกต้อง `AllowUsers` หรือ `AllowGroups` ของ sshd อาจไม่รวม `jodd-ai`: `sudo jodd-ai-host doctor` จะบอกชื่อค่าที่ต้องแก้ |
 | doctor หรือตัวติดตั้งระบุชื่อ `AuthenticationMethods`, `AllowUsers`, `AllowGroups`, `DenyUsers` หรือ `DenyGroups` | แก้ค่านั้นใน `/etc/ssh/sshd_config` ด้วยตัวเองตามที่บรรทัดนั้นบอก ชุดติดตั้งไม่เคยเปลี่ยนค่าเหล่านี้ เพราะมีผลกับทุกบัญชี จากนั้นรัน `sudo jodd-ai-host doctor` อีกครั้ง |
 | ลืมรหัสผ่านของ Docker | `docker compose exec ai-host jodd-ai-host password` |

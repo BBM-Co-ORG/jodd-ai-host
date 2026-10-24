@@ -61,11 +61,11 @@ In Jodd you enter the host, the port, the user and the password once.
    for its status. That proves the restricted key works.
 
 The password is used for that one connection. Jodd does not store, log or show
-it. **Update** uses it again the same way.
+it. **Reinstall helper** uses it again the same way.
 
-Because Jodd needs the password only during Setup and Update, the kit lets you
+Because Jodd needs the password only during Setup, Change server and Reinstall helper, the kit lets you
 turn password login off in between: `sudo jodd-ai-host lock`, and
-`sudo jodd-ai-host unlock` before the next Update.
+`sudo jodd-ai-host unlock` before the next one.
 
 ## What the key can do, and what it cannot stop
 
@@ -144,15 +144,15 @@ There are two limits:
 
 The wrapper has a version number (it is part of its file name). When a newer
 Jodd needs a newer wrapper, Jodd says the host **needs an update**. Press
-**Update** in Jodd's settings and enter the password: Jodd installs the new
+**Reinstall helper** in Jodd's settings and enter the password: Jodd installs the new
 wrapper next to the old one and refreshes its key's line.
 
 Each Jodd device keeps working with its own wrapper version, so a phone and a
 computer on different Jodd versions can share one host. Old wrapper files that
-no key uses any more are deleted at the next Setup or Update.
+no key uses any more are deleted at the next Setup or Reinstall helper.
 
-Use **Update** too after you install a CLI on the host later: the wrapper
-learns the CLI's location only during Setup and Update.
+Use **Reinstall helper** too after you install a CLI on the host later: the wrapper
+learns the CLI's location only during Setup and Reinstall helper.
 
 ## What is stored where
 
