@@ -39,7 +39,7 @@ check first on a VPS or any machine reachable from the internet.
 3. After Setup: `sudo jodd-ai-host adopt-keys`, then `sudo jodd-ai-host lock`.
 
 In Docker, drop `sudo` and put `docker compose exec ai-host` in front.
-**Upgrading a host set up before 1.0.0:** re-run the installer (or
+**Upgrading a host set up before 1.0.0:** download the installer again and run it (or
 `docker compose pull && docker compose up -d`), then `sudo jodd-ai-host adopt-keys`.
 
 ## Documents

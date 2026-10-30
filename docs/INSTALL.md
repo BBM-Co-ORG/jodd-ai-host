@@ -31,18 +31,27 @@ still apply.
 
 ## What has been tested
 
-| Path | Tested | How |
+These rows describe the kit **before 1.0.0**. The 1.0.0 installers (the
+`jodd-ai-mcp` download with its SHA-256 and version checks, the policy,
+`auto-enable`, `adopt-keys`) have **not yet been run end to end** on any of
+these Linux distributions or on a Mac. What has run for 1.0.0 is below the
+table.
+
+| Path | Tested (before 1.0.0) | How |
 |---|---|---|
 | Docker | 2026-10-15 | The image, started with `docker run`: first start without network, both CLIs installed, Jodd's own setup code connecting and finding both CLIs, `lock` / `unlock`, and recreating the container (fingerprint, installed CLIs and lock kept). The `compose.yaml` file itself has not been run end to end yet. |
 | Ubuntu 24.04, Debian 12, Fedora, Alpine | 2026-10-15 | The installer in clean containers: real CLIs installed, real password logins, Jodd's own setup code connecting and finding both CLIs, a server whose sshd already turned password login off for everyone (every other account kept its settings), re-runs that change nothing. Starting sshd through systemd or OpenRC was not part of these tests. |
 | macOS | 2026-10-15 | One Apple Silicon Mac on macOS 27 (OpenSSH 10.3): a new account created, the Remote Login allow-list limited to `jodd-ai`, both CLIs installed, Jodd's own setup code connecting with the password and finding both CLIs, the fingerprint matching what sshd serves, `lock`, and a re-run on the existing account that moved it into a group of its own. macOS 13–26, Intel Macs, `--no-sleep` and the removal steps were not tested. |
 
-All of these runs were on **ARM64** (aarch64) machines. Since 1.0.0, every
-change is also tested in CI on x86_64 Linux: the Docker image end to end over
-real SSH (Jodd's restricted key, both protocols, `adopt-keys`, cancelling,
-the policy kept across a container recreate, `lock` / `unlock`), with
-stand-in CLIs. The installer on four distributions (`test/e2e/linux.sh`) is
-run by hand.
+All of these runs were on **ARM64** (aarch64) machines.
+
+For 1.0.0, CI tests the **Docker image** end to end on x86_64 Linux on every
+change: over real SSH with Jodd's restricted key, both protocols,
+`adopt-keys`, cancelling, the policy kept across a container recreate, and
+`lock` / `unlock`, with stand-in CLIs. The installers' own pieces (download,
+checksum, version check) have unit tests. The end-to-end installer test for
+the four distributions (`test/e2e/linux.sh`) exists but has **not been run**
+for 1.0.0, and the macOS installer has not been run live with `jodd-ai-mcp`.
 
 ## Before you start
 

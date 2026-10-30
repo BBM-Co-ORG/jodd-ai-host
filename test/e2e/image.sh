@@ -169,24 +169,27 @@ started() { # until the fake records its pid (up to 20 s); prints it
   i=0; until tx 'test -s /tmp/fake.pid'; do i=$((i+1)); [ "$i" -gt 100 ] && return 1; sleep 0.2; done
   tx 'cat /tmp/fake.pid'
 }
-gone_within() { # $1 pid in the container, $2 ms: until it is gone (or a zombie) and no scratch is left
-  _end=$(( $(e2e_now_ms) + $2 ))
-  while :; do
-    _st=$(tx "ps -o stat= -p $1" 2>/dev/null | tr -d ' ' || :)
-    _sc=$(tx 'ls -d /tmp/jodd-ai.* 2>/dev/null' || :)
-    case $_st in ''|Z*) [ -z "$_sc" ] && return 0 ;; esac
-    [ "$(e2e_now_ms)" -lt "$_end" ] || { echo "still there: pid $1 [$_st], scratch [$_sc]"; return 1; }
-    sleep 0.2
-  done
+# $1 pid in the container, $2 ms: until it is gone (or a zombie) and no scratch is left. One shell
+# loop inside the container, timed by the container's clock from just after the hangup, so a
+# `docker exec` per poll adds no detection lag. Prints the elapsed ms (or what is left).
+gone_within() {
+  # shellcheck disable=SC2016  # the $ are for the container's shell
+  tx 'end=$(( $(date +%s%3N) + '"$2"' )); t0=$(date +%s%3N)
+    while :; do
+      st=$(ps -o stat= -p '"$1"' 2>/dev/null | tr -d " ")
+      sc=$(ls -d /tmp/jodd-ai.* 2>/dev/null)
+      case $st in ""|Z*) [ -z "$sc" ] && { echo "$(( $(date +%s%3N) - t0 ))"; exit 0; } ;; esac
+      [ "$(date +%s%3N)" -lt "$end" ] || { echo "still there: pid '"$1"' [$st], scratch [$sc]"; exit 1; }
+      sleep 0.05
+    done'
 }
 hangup_check() { # $1 local ssh pid, $2 what
   fpid=$(started) || tfail "$2: the fake CLI never started"
   tx "ps -o stat= -p $fpid" >/dev/null || tfail "$2: the CLI is not running before the hangup"
   [ -n "$(tx 'ls -d /tmp/jodd-ai.* 2>/dev/null' || :)" ] || tfail "$2: no scratch dir while the CLI runs"
-  t0=$(e2e_now_ms)
   kill -9 "$1"
-  gone_within "$fpid" 6000 || tfail "$2: the CLI or its scratch outlived the hangup by 6 s"
-  echo "ok: $2: CLI and scratch gone $(( $(e2e_now_ms) - t0 )) ms after the client vanished"
+  ms=$(gone_within "$fpid" 6000) || tfail "$2: the CLI or its scratch outlived the hangup by 6 s ($ms)"
+  echo "ok: $2: CLI and scratch gone $ms ms after the client vanished"
 }
 # MCP
 tx 'rm -f /tmp/fake.pid'

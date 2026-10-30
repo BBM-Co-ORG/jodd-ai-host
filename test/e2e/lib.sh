@@ -18,9 +18,6 @@ e2e_wait_port() { # $1 port — up to 60 s
   done
 }
 
-# Milliseconds since the epoch (GNU date has %N; this works wherever python3 does).
-e2e_now_ms() { python3 -I -c 'import time; print(int(time.time() * 1000))'; }
-
 # A real password login through the ssh client's askpass, as Jodd's Setup does it. Succeeds only
 # if the server accepted the password. The password goes by environment, not argv.
 # shellcheck disable=SC2016  # $E2E_PW is for the askpass script

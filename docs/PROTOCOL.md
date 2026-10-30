@@ -88,7 +88,7 @@ the version of `jodd-ai-mcp`, for example `1.0.0`. The server offers the
 
 **Tool results.** A tool that ran and failed returns a normal result with
 `isError: true` and `structuredContent.kind` set. Only malformed arguments
-are JSON-RPC errors (`-32602`, invalid params).
+and an unknown tool name are JSON-RPC errors (`-32602`, invalid params).
 
 **Logging.** The server writes one line per call: key id, tool, harness,
 duration and outcome. It never logs the prompt, the system text, the schema
@@ -188,7 +188,8 @@ client can always revoke itself.
 - Arguments: none (`{}` or absent). Any argument is invalid params.
 - It removes every line ending in ` jodd-ai-<id>`, where `<id>` is the
   calling key's `--key`. Other lines keep their bytes and their place.
-- After the answer is sent, the server exits.
+- After the answer to a handled call (any row of the table below) is sent,
+  the server exits. A call refused as invalid params leaves the session open.
 
 | Result | `structuredContent` |
 |---|---|
@@ -259,7 +260,7 @@ against this server. It is not for new clients.
 
 **Scope.** It does what wrapper v2 (Jodd's `src-tauri/src/llm/remote/wrapper.rs`
 at commit `d514d03d`) does, byte for byte: the same stdout, exit codes and
-messages. The differences come only from the policy:
+messages. The differences:
 
 - Only enabled harnesses run. `status` reports `path=-` for a harness that is
   disabled or not installed; old Jodd shows it as not installed. `run` for it
