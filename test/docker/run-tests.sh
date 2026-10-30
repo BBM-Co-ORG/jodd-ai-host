@@ -11,6 +11,8 @@ docker rm -f jodd-ai-host-test >/dev/null 2>&1 || true
 docker run -d --rm --init --name jodd-ai-host-test -p 127.0.0.1:2222:22 jodd-ai-host-test >/dev/null
 trap 'docker rm -f jodd-ai-host-test >/dev/null 2>&1 || true' EXIT
 sleep 2
-cd "$here/../../src-tauri"
+# These tests are Jodd's own (src-tauri/src/llm/remote); JODD_REPO = a checkout of the Jodd app repo.
+JODD_REPO=${JODD_REPO:-$here/../../../Jodd}
+cd "$JODD_REPO/src-tauri"
 # macOS with an unaccepted Xcode license: prefix DEVELOPER_DIR=/Library/Developer/CommandLineTools
 JODD_AI_DOCKER=127.0.0.1:2222 cargo test -p jodd --lib llm::remote::docker_tests -- --ignored --nocapture --test-threads=1

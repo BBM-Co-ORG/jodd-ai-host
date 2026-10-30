@@ -4,7 +4,7 @@
 # Prepares this server so Jodd can run YOUR OWN claude / codex CLI on it, signed in
 # with YOUR OWN account, over a restricted SSH key. Read it before you run it:
 #
-#   curl -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/Jodd-public/main/ai-host/install/linux.sh -o jodd-ai-host-install.sh
+#   curl -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/main/install/linux.sh -o jodd-ai-host-install.sh
 #   sudo sh jodd-ai-host-install.sh
 #
 # What it does, in order (re-running repairs instead of duplicating):
@@ -33,10 +33,10 @@
 #                     sshd's own port is not changed
 #   JODD_AI_KIT_URL   where bin/ and lib/ are fetched from when this script is not run
 #                     from a checkout of the kit
-#                     (default https://raw.githubusercontent.com/BBM-Co-ORG/Jodd-public/main/ai-host)
+#                     (default https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/main)
 #   JODD_AI_SKIP_CLIS=1   do not install claude / codex (offline runs; `jodd-ai-host update-clis` later)
 #
-# Test-only knobs (used by scripts/ai-host-e2e/linux.sh; never needed on a real server):
+# Test-only knobs (used by test/e2e/linux.sh; never needed on a real server):
 #   JODD_AI_START_SSHD=1      when no init system runs (containers), start /usr/sbin/sshd directly
 #   JODD_AI_SEED_CONFIG=FILE  append FILE to /etc/ssh/sshd_config after the packages are
 #                             installed and before anything else, to simulate an admin's config
@@ -60,14 +60,14 @@ fi
 cd /
 
 user=${JODD_AI_USER:-jodd-ai}
-kit_url=${JODD_AI_KIT_URL:-https://raw.githubusercontent.com/BBM-Co-ORG/Jodd-public/main/ai-host}
+kit_url=${JODD_AI_KIT_URL:-https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/main}
 sshd_config=/etc/ssh/sshd_config
 dropin_dir=/etc/ssh/sshd_config.d
 dropin=$dropin_dir/50-jodd-ai.conf
 libdir=/usr/local/lib/jodd-ai-host
 helper=/usr/local/bin/jodd-ai-host
 state=/var/lib/jodd-ai-host
-manual_url=https://github.com/BBM-Co-ORG/Jodd-public/blob/main/docs/ai-host/INSTALL.md
+manual_url=https://github.com/BBM-Co-ORG/jodd-ai-host/blob/main/docs/INSTALL.md
 
 say()  { printf '%s\n' "jodd-ai-host: $*"; }
 warn() { printf '%s\n' "jodd-ai-host: $*" >&2; }

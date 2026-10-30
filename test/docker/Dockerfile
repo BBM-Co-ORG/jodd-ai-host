@@ -1,4 +1,4 @@
-# Throwaway OpenSSH server for the AI-host proof (docs/BACKEND-SSH.md, "AI host").
+# Throwaway OpenSSH server for the AI-host proof (Jodd repo: docs/BACKEND-SSH.md, "AI host").
 # Alpine on purpose: busybox `ash` is a third `sh` (after dash and bash) for the
 # generated wrapper, and its sshd runs the forced command through the user's
 # login shell exactly like a small VPS would.

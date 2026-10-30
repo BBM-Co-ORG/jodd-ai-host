@@ -1,8 +1,8 @@
 #!/bin/sh
-# Runs ai-host/install/linux.sh in clean containers, then checks the result with
+# Runs install/linux.sh in clean containers, then checks the result with
 # Jodd's real setup code. Local only; needs Docker and network (packages and the
 # official CLI installers are downloaded for real).
-# Usage: scripts/ai-host-e2e/linux.sh [image ...]   (default: the four below)
+# Usage: test/e2e/linux.sh [image ...]   (default: the four below)
 #
 # Per image, three containers (a fourth on ubuntu:24.04):
 #   hardened  a server that already says `PasswordAuthentication no` globally and has an
@@ -35,7 +35,7 @@ start() { # $1 scenario
   cleanup
   name="jodd-ai-e2e-$(echo "$img" | tr ':/.' '---')-$scenario"
   docker rm -f "$name" >/dev/null 2>&1 || :
-  docker run -d --name "$name" --init -p "127.0.0.1:$port:22" -v "$repo/ai-host:/kit:ro" "$img" sleep infinity >/dev/null
+  docker run -d --name "$name" --init -p "127.0.0.1:$port:22" -v "$repo:/kit:ro" "$img" sleep infinity >/dev/null
 }
 x() { docker exec "$name" sh -c "$1"; }
 install() { # extra docker-exec args first, e.g. -e JODD_AI_SKIP_CLIS=1
@@ -298,10 +298,10 @@ done
 # Refusals before anything is touched (once, not per image): no known package manager; not root.
 name=jodd-ai-e2e-refusals
 docker rm -f "$name" >/dev/null 2>&1 || :
-if out=$(docker run --rm --name "$name" -v "$repo/ai-host:/kit:ro" busybox sh /kit/install/linux.sh 2>&1); then echo "FAIL: ran on a system with no apt, dnf or apk"; exit 1; fi
+if out=$(docker run --rm --name "$name" -v "$repo:/kit:ro" busybox sh /kit/install/linux.sh 2>&1); then echo "FAIL: ran on a system with no apt, dnf or apk"; exit 1; fi
 printf '%s\n' "$out" | grep -q 'Unsupported package manager' || { echo "FAIL: no 'Unsupported package manager' message: $out"; exit 1; }
 printf '%s\n' "$out" | grep -q 'INSTALL.md#other-linux' || { echo "FAIL: no link to the manual steps: $out"; exit 1; }
-if out=$(docker run --rm --name "$name" --user 1000 -v "$repo/ai-host:/kit:ro" busybox sh /kit/install/linux.sh 2>&1); then echo "FAIL: ran as a non-root user"; exit 1; fi
+if out=$(docker run --rm --name "$name" --user 1000 -v "$repo:/kit:ro" busybox sh /kit/install/linux.sh 2>&1); then echo "FAIL: ran as a non-root user"; exit 1; fi
 printf '%s\n' "$out" | grep -q 'run this as root' || { echo "FAIL: no root message: $out"; exit 1; }
 name=
 echo "ok: refuses an unsupported package manager (with the manual link) and a non-root user"

@@ -5,7 +5,7 @@
 AI host คือเครื่องของคุณเองที่ Jodd ใช้รัน Claude Code หรือ Codex แทนคุณผ่าน SSH
 คู่มือนี้อธิบายการตั้งเครื่อง การเชื่อม Jodd เข้ากับเครื่อง และการดูแลให้ปลอดภัย
 ส่วนการทำงานภายในอยู่ใน [How it works](HOW-IT-WORKS.md) (ภาษาอังกฤษ)
-และฝั่งแอป Jodd อยู่ใน[คู่มือการใช้งาน](USER-GUIDE.th.md)
+และฝั่งแอป Jodd อยู่ใน[คู่มือการใช้งาน](https://github.com/BBM-Co-ORG/Jodd-public/blob/main/docs/ai-host/USER-GUIDE.th.md)
 
 **CLI ของคุณเอง บัญชีของคุณเอง บนเซิร์ฟเวอร์ของคุณเอง ภายใต้ข้อกำหนดของผู้ให้บริการ**
 คุณติดตั้ง CLI และลงชื่อเข้าใช้ (sign in) ด้วยตัวเอง Jodd ไม่เคยเห็นข้อมูลการลงชื่อเข้าใช้นั้น
@@ -75,7 +75,7 @@ cd jodd-ai-host
 ดาวน์โหลดไฟล์ compose:
 
 ```sh
-curl -fsSLO https://raw.githubusercontent.com/BBM-Co-ORG/Jodd-public/main/ai-host/docker/compose.yaml
+curl -fsSLO https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/main/docker/compose.yaml
 ```
 
 **ตั้งรหัสผ่านเอง (แนะนำ)** สร้างไฟล์ชื่อ `.env` ไว้ข้าง ๆ `compose.yaml`
@@ -159,7 +159,7 @@ docker compose exec ai-host jodd-ai-host password
 ดาวน์โหลดตัวติดตั้ง:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/Jodd-public/main/ai-host/install/linux.sh -o jodd-ai-host-install.sh
+curl -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/main/install/linux.sh -o jodd-ai-host-install.sh
 ```
 
 อ่านก่อนรัน เพราะตัวติดตั้งทำงานด้วยสิทธิ์ root:
@@ -238,7 +238,7 @@ sudo JODD_AI_SKIP_CLIS=1 sh jodd-ai-host-install.sh
 ดาวน์โหลดตัวติดตั้ง:
 
 ```sh
-curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/Jodd-public/main/ai-host/install/macos.sh -o jodd-ai-host-install.sh
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/main/install/macos.sh -o jodd-ai-host-install.sh
 ```
 
 ดูทุกขั้นตอนที่ตัวติดตั้งจะทำ โดยไม่เปลี่ยนแปลงอะไรเลย (ไม่ต้องใช้ `sudo`):
@@ -423,15 +423,15 @@ sudo mkdir -p /usr/local/lib/jodd-ai-host
 ```
 
 ```sh
-sudo curl -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/Jodd-public/main/ai-host/bin/jodd-ai-host -o /usr/local/bin/jodd-ai-host
+sudo curl -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/main/bin/jodd-ai-host -o /usr/local/bin/jodd-ai-host
 ```
 
 ```sh
-sudo curl -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/Jodd-public/main/ai-host/lib/dropin.sh -o /usr/local/lib/jodd-ai-host/dropin.sh
+sudo curl -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/main/lib/dropin.sh -o /usr/local/lib/jodd-ai-host/dropin.sh
 ```
 
 ```sh
-sudo curl -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/Jodd-public/main/ai-host/lib/doctor.sh -o /usr/local/lib/jodd-ai-host/doctor.sh
+sudo curl -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/main/lib/doctor.sh -o /usr/local/lib/jodd-ai-host/doctor.sh
 ```
 
 ```sh
@@ -483,7 +483,7 @@ sudo jodd-ai-host signin codex
 
 ## <a id="connect-from-jodd"></a>เชื่อมต่อจาก Jodd
 
-ใน Jodd คุณกรอกข้อมูลสี่อย่าง [คู่มือการใช้งาน](USER-GUIDE.th.md#set-up-a-server)
+ใน Jodd คุณกรอกข้อมูลสี่อย่าง [คู่มือการใช้งาน](https://github.com/BBM-Co-ORG/Jodd-public/blob/main/docs/ai-host/USER-GUIDE.th.md#set-up-a-server)
 อธิบายทีละหน้าจอ
 
 | ช่อง | สิ่งที่ต้องกรอก |
@@ -716,4 +716,4 @@ sudo jodd-ai-host status
 | doctor บอกว่าติดตั้ง CLI แล้ว แต่ login shell หาไม่เจอ | รันตัวติดตั้งซ้ำ หรือเพิ่มบรรทัดที่ doctor พิมพ์ไว้ลงใน `~/.profile` ของบัญชี |
 | doctor บอกว่า sshd ไม่อนุญาตให้ `jodd-ai` เข้าสู่ระบบด้วยรหัสผ่าน | รันตัวติดตั้งซ้ำ หรือตรวจว่า `/etc/ssh/sshd_config` อ่าน drop-in ก่อน ([ขั้นที่ 4](#other-linux)) |
 
-ทุกข้อความที่ Jodd อาจแสดง และสิ่งที่ต้องทำ อยู่ใน[คู่มือการใช้งาน](USER-GUIDE.th.md#messages-and-what-to-do)
+ทุกข้อความที่ Jodd อาจแสดง และสิ่งที่ต้องทำ อยู่ใน[คู่มือการใช้งาน](https://github.com/BBM-Co-ORG/Jodd-public/blob/main/docs/ai-host/USER-GUIDE.th.md#messages-and-what-to-do)

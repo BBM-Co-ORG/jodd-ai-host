@@ -9,7 +9,7 @@ name=jodd-ai-e2e-image port=2224 pw=e2e-image-pw
 state=/var/lib/jodd-ai-host
 cleanup() { docker rm -f "$name" >/dev/null 2>&1 || :; docker volume rm -f "$name-home" "$name-state" >/dev/null 2>&1 || :; }
 trap cleanup EXIT; cleanup
-docker build -q -t jodd-ai-host:e2e -f "$repo/ai-host/docker/Dockerfile" "$repo/ai-host" >/dev/null
+docker build -q -t jodd-ai-host:e2e -f "$repo/docker/Dockerfile" "$repo" >/dev/null
 # run [extra docker args]: --network none cannot publish a port, so it is added only without it.
 run() {
   case " $* " in *' --network none '*) pub= ;; *) pub="-p 127.0.0.1:$port:22" ;; esac

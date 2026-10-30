@@ -1,9 +1,9 @@
 # Jodd AI host: OpenSSH plus a dedicated account for the claude / codex CLIs.
 # The CLIs are NOT in this image: they install from their official installers
 # into the account's home volume on first start, on your machine.
-# Guide: https://github.com/BBM-Co-ORG/Jodd-public/blob/main/docs/ai-host/INSTALL.md
+# Guide: https://github.com/BBM-Co-ORG/jodd-ai-host/blob/main/docs/INSTALL.md
 FROM debian:bookworm-slim
-LABEL org.opencontainers.image.source="https://github.com/BBM-Co-ORG/Jodd-public" \
+LABEL org.opencontainers.image.source="https://github.com/BBM-Co-ORG/jodd-ai-host" \
       org.opencontainers.image.description="AI host for Jodd: run your own claude / codex CLI over a restricted SSH key" \
       org.opencontainers.image.licenses="Apache-2.0"
 RUN apt-get update \

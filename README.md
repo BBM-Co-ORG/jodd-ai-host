@@ -31,7 +31,7 @@ still apply.
 **Docker** (any machine with Docker and the Compose plugin):
 
 ```sh
-curl -fsSLO https://raw.githubusercontent.com/BBM-Co-ORG/Jodd-public/main/ai-host/docker/compose.yaml
+curl -fsSLO https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/main/docker/compose.yaml
 docker compose up -d
 docker compose logs
 ```
@@ -39,7 +39,7 @@ docker compose logs
 **Linux** (Ubuntu, Debian, Fedora and Alpine tested; RHEL not yet tested). Download, read, then run:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/Jodd-public/main/ai-host/install/linux.sh -o jodd-ai-host-install.sh
+curl -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/main/install/linux.sh -o jodd-ai-host-install.sh
 less jodd-ai-host-install.sh
 sudo sh jodd-ai-host-install.sh
 ```
@@ -48,13 +48,13 @@ sudo sh jodd-ai-host-install.sh
 macOS 27; try the dry run first, it changes nothing:
 
 ```sh
-curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/Jodd-public/main/ai-host/install/macos.sh -o jodd-ai-host-install.sh
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/main/install/macos.sh -o jodd-ai-host-install.sh
 sh jodd-ai-host-install.sh --dry-run
 sudo sh jodd-ai-host-install.sh
 ```
 
 **On a VPS or any machine reachable from the internet, read the
-[install guide](../docs/ai-host/INSTALL.md) first.** Password login for the
+[install guide](docs/INSTALL.md) first.** Password login for the
 AI account is open until you lock it, and the Docker port is published on
 every address unless you set `JODD_AI_BIND`.
 
@@ -75,6 +75,6 @@ The commands below are for Linux and macOS. In Docker, drop `sudo` and put
 
 ## Guides
 
-- [Install guide](../docs/ai-host/INSTALL.md): every path, networking, hardening, updating, removing, troubleshooting.
-- [User guide](../docs/ai-host/USER-GUIDE.md): the Jodd side, and every message Jodd can show with what to do.
-- [How it works](../docs/ai-host/HOW-IT-WORKS.md): what the key can and cannot do, where your data goes, what is stored where.
+- [Install guide](docs/INSTALL.md): every path, networking, hardening, updating, removing, troubleshooting.
+- [User guide](https://github.com/BBM-Co-ORG/Jodd-public/blob/main/docs/ai-host/USER-GUIDE.md): the Jodd side, and every message Jodd can show with what to do.
+- [How it works](docs/HOW-IT-WORKS.md): what the key can and cannot do, where your data goes, what is stored where.

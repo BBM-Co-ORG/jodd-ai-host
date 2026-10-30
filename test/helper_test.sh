@@ -1,7 +1,7 @@
 #!/bin/sh
 # shellcheck disable=SC2012  # ls is only used on files this test created, with plain names
 # shellcheck disable=SC2016  # fake scripts and expected strings hold a literal $ for the shell that runs them
-# Tests for the parts of jodd-ai-host that touch only files. Run: sh ai-host/test/helper_test.sh
+# Tests for the parts of jodd-ai-host that touch only files. Run: sh test/helper_test.sh
 set -u
 here=$(cd "$(dirname "$0")/.." && pwd)
 t=$(mktemp -d); trap 'rm -rf "$t"' EXIT

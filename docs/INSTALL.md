@@ -5,7 +5,7 @@
 An AI host is a machine you own where Jodd runs Claude Code or Codex for you,
 over SSH. This guide sets one up, connects Jodd to it, and keeps it safe. How
 it works inside is in [How it works](HOW-IT-WORKS.md); the Jodd side is in the
-[user guide](USER-GUIDE.md).
+[user guide](https://github.com/BBM-Co-ORG/Jodd-public/blob/main/docs/ai-host/USER-GUIDE.md).
 
 **Your own CLI, your own account, on your own server, under the provider's
 terms.** You install the CLI and sign in to it yourself; Jodd never sees that
@@ -78,7 +78,7 @@ cd jodd-ai-host
 Download the compose file:
 
 ```sh
-curl -fsSLO https://raw.githubusercontent.com/BBM-Co-ORG/Jodd-public/main/ai-host/docker/compose.yaml
+curl -fsSLO https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/main/docker/compose.yaml
 ```
 
 **Choose a password (recommended).** Create a file named `.env` next to
@@ -166,7 +166,7 @@ limit the SSH port with a firewall ([Harden](#harden)).
 Download the installer:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/Jodd-public/main/ai-host/install/linux.sh -o jodd-ai-host-install.sh
+curl -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/main/install/linux.sh -o jodd-ai-host-install.sh
 ```
 
 Read it before you run it. It runs as root:
@@ -249,7 +249,7 @@ Needs macOS 13 (Ventura) or newer, and a Mac that stays on.
 Download the installer:
 
 ```sh
-curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/Jodd-public/main/ai-host/install/macos.sh -o jodd-ai-host-install.sh
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/main/install/macos.sh -o jodd-ai-host-install.sh
 ```
 
 See every step it would take, without changing anything (no `sudo` needed):
@@ -444,15 +444,15 @@ sudo mkdir -p /usr/local/lib/jodd-ai-host
 ```
 
 ```sh
-sudo curl -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/Jodd-public/main/ai-host/bin/jodd-ai-host -o /usr/local/bin/jodd-ai-host
+sudo curl -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/main/bin/jodd-ai-host -o /usr/local/bin/jodd-ai-host
 ```
 
 ```sh
-sudo curl -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/Jodd-public/main/ai-host/lib/dropin.sh -o /usr/local/lib/jodd-ai-host/dropin.sh
+sudo curl -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/main/lib/dropin.sh -o /usr/local/lib/jodd-ai-host/dropin.sh
 ```
 
 ```sh
-sudo curl -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/Jodd-public/main/ai-host/lib/doctor.sh -o /usr/local/lib/jodd-ai-host/doctor.sh
+sudo curl -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/main/lib/doctor.sh -o /usr/local/lib/jodd-ai-host/doctor.sh
 ```
 
 ```sh
@@ -507,7 +507,7 @@ In Docker, use `docker compose exec ai-host jodd-ai-host signin claude` and
 
 ## Connect from Jodd
 
-In Jodd you enter four things. The [user guide](USER-GUIDE.md#set-up-a-server)
+In Jodd you enter four things. The [user guide](https://github.com/BBM-Co-ORG/Jodd-public/blob/main/docs/ai-host/USER-GUIDE.md#set-up-a-server)
 walks through the screens.
 
 | Field | What to enter |
@@ -755,4 +755,4 @@ In Docker, run these and every command below as
 | The doctor says sshd does not allow password login for `jodd-ai` | Re-run the installer, or check that `/etc/ssh/sshd_config` reads the drop-in first ([step 4](#other-linux)) |
 
 Every message Jodd can show, and what to do about it, is in the
-[user guide](USER-GUIDE.md#messages-and-what-to-do).
+[user guide](https://github.com/BBM-Co-ORG/Jodd-public/blob/main/docs/ai-host/USER-GUIDE.md#messages-and-what-to-do).

@@ -2,7 +2,7 @@
 
 This page explains what happens between Jodd and your AI host, what Jodd's key
 can and cannot do, and where your data goes. To set a host up, see the
-[install guide](INSTALL.md). For the Jodd side, see the [user guide](USER-GUIDE.md).
+[install guide](INSTALL.md). For the Jodd side, see the [user guide](https://github.com/BBM-Co-ORG/Jodd-public/blob/main/docs/ai-host/USER-GUIDE.md).
 
 **Your own CLI, your own account, on your own server, under the provider's
 terms.** You install Claude Code or Codex on a machine you control and sign in

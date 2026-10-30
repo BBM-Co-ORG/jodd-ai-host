@@ -5,7 +5,7 @@
 # account, over a restricted SSH key. Read it before you run it - and try it first, it changes
 # nothing with --dry-run (no sudo needed):
 #
-#   curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/Jodd-public/main/ai-host/install/macos.sh -o jodd-ai-host-install.sh
+#   curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/main/install/macos.sh -o jodd-ai-host-install.sh
 #   sh jodd-ai-host-install.sh --dry-run
 #   sudo sh jodd-ai-host-install.sh
 #
@@ -48,7 +48,7 @@
 #   JODD_AI_PORT      only what the final summary reports (e.g. a forwarded port)
 #   JODD_AI_KIT_URL   where bin/ and lib/ are fetched from when this script is not run
 #                     from a checkout of the kit
-#                     (default https://raw.githubusercontent.com/BBM-Co-ORG/Jodd-public/main/ai-host)
+#                     (default https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/main)
 #   JODD_AI_SKIP_CLIS=1   do not install claude / codex (offline runs; `jodd-ai-host update-clis` later)
 #
 # Test-only knob (the same one linux.sh has; used by the live-run checklist, never needed otherwise):
@@ -71,7 +71,7 @@ cd /
 
 user=${JODD_AI_USER:-jodd-ai}
 fullname="Jodd AI host"
-kit_url=${JODD_AI_KIT_URL:-https://raw.githubusercontent.com/BBM-Co-ORG/Jodd-public/main/ai-host}
+kit_url=${JODD_AI_KIT_URL:-https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/main}
 sshd=/usr/sbin/sshd
 sshd_config=/etc/ssh/sshd_config
 dropin_dir=/etc/ssh/sshd_config.d
@@ -82,7 +82,7 @@ hostkey=/etc/ssh/ssh_host_ed25519_key.pub
 ssh_group=com.apple.access_ssh
 staff_gid=20         # macOS's `staff`: every account sysadminctl creates gets it as its primary group
 users_dir=/Users     # where the summary looks for other people's home folders
-manual_url=https://github.com/BBM-Co-ORG/Jodd-public/blob/main/docs/ai-host/INSTALL.md
+manual_url=https://github.com/BBM-Co-ORG/jodd-ai-host/blob/main/docs/INSTALL.md
 
 say()  { printf '%s\n' "jodd-ai-host: $*"; }
 warn() { printf '%s\n' "jodd-ai-host: $*" >&2; }

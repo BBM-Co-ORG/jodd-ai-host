@@ -1,6 +1,6 @@
 #!/bin/sh
 # jodd-ai-host — manage this machine as an AI host for Jodd.
-# Docs: https://github.com/BBM-Co-ORG/Jodd-public/blob/main/docs/ai-host/INSTALL.md
+# Docs: https://github.com/BBM-Co-ORG/jodd-ai-host/blob/main/docs/INSTALL.md
 set -u
 CONF=${JODD_AI_HOST_CONF:-/etc/jodd-ai-host.conf}
 [ -r "$CONF" ] || { echo "jodd-ai-host: $CONF not found. Install the AI host kit first (see the docs link at the top of this file)." >&2; exit 1; }

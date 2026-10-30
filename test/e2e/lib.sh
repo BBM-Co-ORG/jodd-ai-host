@@ -1,12 +1,15 @@
 # Shared by the e2e drivers. Source it; do not run it.
 repo=$(cd "$(dirname "$0")/../.." && pwd)
+# The acceptance test is Jodd's own setup code (src-tauri/src/llm/remote), which lives in the
+# Jodd app repo. Point JODD_REPO at a checkout of it (default: ../Jodd beside this repo).
+JODD_REPO=${JODD_REPO:-$repo/../Jodd}
 
 e2e_run_jodd_tests() { # $1 port, $2 container, $3 password
   # An unaccepted Xcode licence breaks the linker on a Mac; the command-line tools still link.
   if [ "$(uname)" = Darwin ] && [ -z "${DEVELOPER_DIR:-}" ] && [ -d /Library/Developer/CommandLineTools ]; then
     export DEVELOPER_DIR=/Library/Developer/CommandLineTools
   fi
-  ( cd "$repo/src-tauri" && JODD_AI_E2E="127.0.0.1:$1" JODD_AI_E2E_CONTAINER="$2" JODD_AI_E2E_PASSWORD="$3" \
+  ( cd "$JODD_REPO/src-tauri" && JODD_AI_E2E="127.0.0.1:$1" JODD_AI_E2E_CONTAINER="$2" JODD_AI_E2E_PASSWORD="$3" \
     cargo test -p jodd --lib llm::remote::host_kit_tests -- --ignored --nocapture --test-threads=1 )
 }
 

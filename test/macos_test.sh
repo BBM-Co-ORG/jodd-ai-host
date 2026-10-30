@@ -1,8 +1,8 @@
 #!/bin/sh
 # shellcheck disable=SC2012  # ls only reads folders this test created, with plain names
 # shellcheck disable=SC2016  # fake scripts hold a literal $ for the shell that runs them
-# Tests for the allow-list helpers of ai-host/install/macos.sh against fake dseditgroup / dscl
-# (nothing touches this Mac). Run: sh ai-host/test/macos_test.sh
+# Tests for the allow-list helpers of install/macos.sh against fake dseditgroup / dscl
+# (nothing touches this Mac). Run: sh test/macos_test.sh
 set -u
 here=$(cd "$(dirname "$0")/.." && pwd)
 t=$(mktemp -d); trap 'rm -rf "$t"' EXIT

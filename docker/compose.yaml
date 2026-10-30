@@ -1,5 +1,5 @@
 # Jodd AI host. Start: docker compose up -d   Logs (password, fingerprint): docker compose logs
-# Guide: https://github.com/BBM-Co-ORG/Jodd-public/blob/main/docs/ai-host/INSTALL.md
+# Guide: https://github.com/BBM-Co-ORG/jodd-ai-host/blob/main/docs/INSTALL.md
 name: jodd-ai-host
 services:
   ai-host:
