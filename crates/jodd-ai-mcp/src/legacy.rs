@@ -140,9 +140,6 @@ async fn run_verb(
     else {
         return refuse(stderr, UNKNOWN, EX_USAGE).await;
     };
-    let Some(_slot) = slots.try_acquire() else {
-        return refuse(stderr, BUSY, EX_SOFTWARE).await;
-    };
 
     let mut stdin = BufReader::new(stdin);
     let (schema_line, n) = match read_header(&mut stdin, policy.max_request_bytes).await {
@@ -167,6 +164,12 @@ async fn run_verb(
             Some(s) => Some(s),
             None => return EX_SOFTWARE,
         }
+    };
+    // Only now, with the whole prompt in hand: an upload that stalls (a phone
+    // losing signal; sshd may not notice for hours) must hold no slot, or two
+    // stalls lock every run out. Wrapper v2 held nothing during the upload.
+    let Some(_slot) = slots.try_acquire() else {
+        return refuse(stderr, BUSY, EX_SOFTWARE).await;
     };
 
     let def = harness::def(id);

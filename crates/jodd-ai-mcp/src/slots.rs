@@ -17,6 +17,7 @@
 use std::fs::{DirBuilder, File, OpenOptions};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use nix::fcntl::{Flock, FlockArg, OFlag};
 use nix::unistd::{access, AccessFlags};
@@ -24,9 +25,12 @@ use nix::unistd::{access, AccessFlags};
 const RUN_DIR: &str = "/run/jodd-ai-host/slots";
 
 pub struct Slots {
-    /// `None` when no usable lock directory exists: every acquire then fails
-    /// (closed), rather than running unbounded.
-    dir: Option<PathBuf>,
+    /// Resolved (and created) on the first acquire, never before: only a
+    /// `run` makes the lock directory, so a root `status` probe cannot leave
+    /// a root-owned `/run/jodd-ai-host` behind (ruling R14). `None` when no
+    /// usable directory exists: every acquire then fails (closed), rather
+    /// than running unbounded.
+    dir: OnceLock<Option<PathBuf>>,
     n: u32,
 }
 
@@ -40,14 +44,17 @@ impl Slots {
     /// `n` slots in the default lock directory. `n == 0` admits nothing.
     pub fn new(n: u32) -> Self {
         Slots {
-            dir: default_dir(),
+            dir: OnceLock::new(),
             n,
         }
     }
 
     /// The first free slot, without waiting; `None` when all `n` are held.
     pub fn try_acquire(&self) -> Option<SlotGuard> {
-        let dir = self.dir.as_ref()?;
+        if self.n == 0 {
+            return None;
+        }
+        let dir = self.dir.get_or_init(default_dir).as_ref()?;
         (0..self.n).find_map(|i| {
             let file = open_slot(&dir.join(i.to_string())).ok()?;
             Flock::lock(file, FlockArg::LockExclusiveNonblock)
@@ -109,7 +116,7 @@ mod tests {
 
     fn slots(dir: &Path, n: u32) -> Slots {
         Slots {
-            dir: Some(dir.to_path_buf()),
+            dir: OnceLock::from(Some(dir.to_path_buf())),
             n,
         }
     }
@@ -142,7 +149,12 @@ mod tests {
     fn zero_slots_or_no_dir_admits_nothing() {
         let d = tempfile::tempdir().unwrap();
         assert!(slots(d.path(), 0).try_acquire().is_none());
-        assert!(Slots { dir: None, n: 4 }.try_acquire().is_none());
+        assert!(Slots {
+            dir: OnceLock::from(None),
+            n: 4
+        }
+        .try_acquire()
+        .is_none());
     }
 
     #[test]

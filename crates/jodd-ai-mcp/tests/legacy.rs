@@ -842,3 +842,63 @@ fn admin_is_only_for_a_shell_without_a_forced_command() {
     let (code, _, err) = forced(&fx, None, "admin keys", b"");
     assert_eq!((code, err.as_str()), (64, "unknown request\n"));
 }
+
+#[test]
+fn a_stalled_upload_holds_no_slot() {
+    // A client whose network stalls mid-upload (a phone losing signal) must
+    // not hold a slot while it stalls: wrapper v2 held nothing during upload.
+    let fx = Fx::with(
+        on(&fake("fake-claude"), 120),
+        None,
+        "max_concurrent_runs = 1\n",
+    );
+    let mut stalled = spawn(&fx, &req("run", "claude"), &[]);
+    let mut stalled_in = stalled.stdin.take().unwrap();
+    // The header promises 100 bytes; none follow, and stdin stays open.
+    stalled_in.write_all(b"-\n100\n").unwrap();
+    stalled_in.flush().unwrap();
+    std::thread::sleep(Duration::from_millis(500));
+    assert!(
+        stalled.try_wait().unwrap().is_none(),
+        "the stalled upload is still waiting"
+    );
+
+    let (code, out, err) = run(&fx, &req("run", "claude"), &[], &v2("-", "hi"));
+    assert_eq!(
+        code, 0,
+        "a stalled upload must not make the host busy: {err}"
+    );
+    assert_eq!(out, r#"{"result":"hi","args":8}"#);
+
+    drop(stalled_in);
+    let (code, _, err) = finish(stalled);
+    assert_eq!(code, 70, "{err}");
+}
+
+#[test]
+fn status_and_forget_make_no_slot_dir() {
+    // Ruling R14: only `run` may create the lock directory, so a root
+    // `status` probe can never leave a root-owned /run/jodd-ai-host behind.
+    let fx = Fx::new(false);
+    let slots = fx.path("slots/not-yet");
+    let env = [("JODD_AI_MCP_SLOTS_DIR", &*s(&slots))];
+    let (code, _, err) = run(&fx, &req("status", ""), &env, b"");
+    assert_eq!(code, 0, "{err}");
+    let (code, _, err) = run(
+        &fx,
+        &[
+            "--key".into(),
+            "3f2a9b1c".into(),
+            "jodd-ai-run".into(),
+            "2".into(),
+            "forget".into(),
+        ],
+        &env,
+        b"",
+    );
+    assert_eq!(code, 0, "{err}");
+    assert!(!slots.exists(), "status/forget created the slot dir");
+    let (code, _, err) = run(&fx, &req("run", "codex"), &env, &v2("-", "x"));
+    assert_eq!(code, 0, "{err}");
+    assert!(slots.is_dir(), "run creates it");
+}
