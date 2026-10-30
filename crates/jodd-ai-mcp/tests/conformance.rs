@@ -270,6 +270,8 @@ struct Raw {
     child: Child,
     stdin: Option<ChildStdin>,
     lines: mpsc::Receiver<Value>,
+    /// Every response id read so far.
+    seen: Vec<Value>,
 }
 
 impl Raw {
@@ -302,6 +304,7 @@ impl Raw {
             stdin: child.stdin.take(),
             child,
             lines,
+            seen: Vec::new(),
         };
         raw.send(json!({
             "jsonrpc": "2.0", "id": 0, "method": "initialize",
@@ -337,17 +340,28 @@ impl Raw {
         }));
     }
 
-    /// The response to request `id`, skipping anything else.
-    fn response(&self, id: u64, within: Duration) -> Option<Value> {
+    /// The response to request `id`; everything read is recorded in `seen`.
+    fn response(&mut self, id: u64, within: Duration) -> Option<Value> {
         let deadline = Instant::now() + within;
         loop {
             let left = deadline.checked_duration_since(Instant::now())?;
-            match self.lines.recv_timeout(left) {
-                Ok(v) if v.get("id") == Some(&json!(id)) => return Some(v),
-                Ok(_) => continue,
-                Err(_) => return None,
+            let v = self.lines.recv_timeout(left).ok()?;
+            if let Some(got) = v.get("id") {
+                self.seen.push(got.clone());
+            }
+            if v.get("id") == Some(&json!(id)) {
+                return Some(v);
             }
         }
+    }
+
+    /// Reads whatever arrives for `within`, recording it in `seen`.
+    fn drain(&mut self, within: Duration) {
+        let _ = self.response(u64::MAX, within);
+    }
+
+    fn saw(&self, id: u64) -> bool {
+        self.seen.contains(&json!(id))
     }
 
     fn close_stdin(&mut self) {
@@ -772,8 +786,14 @@ fn cancelled_notification_kills_cli() {
     s.send(json!({"jsonrpc": "2.0", "id": 8, "method": "tools/list"}));
     let r = s.response(8, QUICK).expect("server stopped answering");
     assert!(r["result"]["tools"].is_array(), "{r}");
-    // MCP: a cancelled request gets no response.
-    assert!(s.response(7, Duration::from_millis(300)).is_none());
+    // MCP: a cancelled request gets no response, before id 8's or after it.
+    s.drain(Duration::from_millis(500));
+    assert!(s.saw(0) && s.saw(8), "the recorder works: {:?}", s.seen);
+    assert!(
+        !s.saw(7),
+        "the cancelled request was answered: {:?}",
+        s.seen
+    );
     let log = fx.log_lines();
     assert_eq!(log.len(), 1, "{log:?}");
     assert!(log[0].contains("outcome=cancelled"), "{log:?}");
@@ -1035,4 +1055,102 @@ fn mcp_request_with_extra_words_is_unknown() {
     assert_eq!(out.status.code(), Some(64));
     assert_eq!(String::from_utf8_lossy(&out.stderr), "unknown request\n");
     assert!(out.stdout.is_empty());
+}
+
+// ------------------------------------------------- policy and line limits
+
+#[tokio::test]
+async fn disable_mid_session_reaches_next_infer() {
+    // Ruling R19: infer re-reads the policy on every call.
+    let fx = Fx::both();
+    let started = fx.path("cli.started");
+    let c = client(&fx, &[("FAKE_STARTED", &started.to_string_lossy())]).await;
+    let r = infer(&c, json!({"harness": "codex", "prompt": "p"})).await;
+    assert!(!is_error(&r), "{r:?}");
+    std::fs::remove_file(&started).unwrap();
+
+    // The administrator disables codex while the session is open.
+    let policy = std::fs::read_to_string(fx.policy()).unwrap();
+    let disabled = policy.replacen(
+        "[harness.codex]\nenabled = true",
+        "[harness.codex]\nenabled = false",
+        1,
+    );
+    assert_ne!(policy, disabled);
+    std::fs::write(fx.policy(), &disabled).unwrap();
+    let r = infer(&c, json!({"harness": "codex", "prompt": "p"})).await;
+    assert_eq!(kind(&r), "not_enabled");
+    assert!(
+        text(&r).contains("sudo jodd-ai-host enable codex"),
+        "{}",
+        text(&r)
+    );
+    assert!(!started.exists(), "the CLI must never start");
+
+    // A lowered limit reaches the session too.
+    std::fs::write(fx.policy(), format!("max_request_bytes = 10\n{policy}")).unwrap();
+    let r = infer(&c, json!({"harness": "claude", "prompt": "x".repeat(11)})).await;
+    assert_eq!(kind(&r), "too_large");
+}
+
+#[test]
+fn oversized_line_drops_connection_without_running() {
+    // Ruling R20: a line over 4 x max_request_bytes + 64 KiB ends the
+    // connection; the server never buffers it whole and runs nothing.
+    let fx = Fx::with(
+        None,
+        on(&fake("fake-codex"), 180),
+        "max_request_bytes = 100\n",
+    );
+    let started = fx.path("cli.started");
+    let mut s = Raw::start(&fx, &[("FAKE_STARTED", &started.to_string_lossy())]);
+    let line = json!({
+        "jsonrpc": "2.0", "id": 5, "method": "tools/call",
+        "params": {"name": "infer", "arguments": {"harness": "codex", "prompt": "x".repeat(70_000)}}
+    })
+    .to_string();
+    assert!(line.len() > 4 * 100 + 64 * 1024);
+    // The server stops reading partway: a broken pipe here is expected.
+    let stdin = s.stdin.as_mut().unwrap();
+    let _ = stdin
+        .write_all(line.as_bytes())
+        .and_then(|_| stdin.write_all(b"\n"));
+    let st = s.exited_within(Duration::from_secs(10));
+    assert!(st.is_some(), "the server kept the connection");
+    assert_eq!(st.unwrap().code(), Some(0), "a clean exit after the drain");
+    assert!(s.response(5, Duration::from_millis(300)).is_none());
+    assert!(!started.exists(), "the CLI must never start");
+    assert!(
+        fx.log_lines().is_empty(),
+        "not a call: {:?}",
+        fx.log_lines()
+    );
+    assert_eq!(std::fs::read_to_string(fx.path("raw.stderr")).unwrap(), "");
+}
+
+#[test]
+fn a_line_under_the_cap_is_still_served() {
+    // The cap leaves room for JSON escaping: a prompt at max_request_bytes
+    // whose every byte is escaped (\" is 2 bytes for 1) still arrives.
+    let fx = Fx::with(
+        None,
+        on(&fake("fake-codex"), 180),
+        "max_request_bytes = 100\n",
+    );
+    let mut s = Raw::start(&fx, &[]);
+    s.call(
+        4,
+        "infer",
+        json!({"harness": "codex", "prompt": "\"".repeat(100)}),
+    );
+    let r = s.response(4, QUICK).expect("no response");
+    assert_ne!(r["result"]["isError"], json!(true), "{r}");
+    // And garbage lines are skipped, not fatal.
+    s.send(json!("not a request"));
+    s.stdin.as_mut().unwrap().write_all(b"{not json\n").unwrap();
+    s.send(json!({"jsonrpc": "2.0", "id": 9, "method": "tools/list"}));
+    assert!(
+        s.response(9, QUICK).is_some(),
+        "a bad line ended the session"
+    );
 }

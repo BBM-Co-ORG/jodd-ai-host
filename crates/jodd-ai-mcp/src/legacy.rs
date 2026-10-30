@@ -70,7 +70,13 @@ pub async fn serve(
     match req.verb.as_str() {
         // `status` and `forget` answer any version (they come before the check).
         "status" => status(policy, &mut stdout).await,
-        "forget" => forget(key, &mut stderr).await,
+        "forget" => {
+            // One metadata line, like MCP's `forget_key` (ruling R21).
+            let started = Instant::now();
+            let (code, outcome) = forget(key, &mut stderr).await;
+            crate::log::call(key, "jodd-ai-run-forget", None, started.elapsed(), outcome);
+            code
+        }
         "run" => {
             // One metadata line per run (ruling R16), as for an MCP call.
             let started = Instant::now();
@@ -114,13 +120,15 @@ async fn status(policy: &Policy, stdout: &mut (impl AsyncWrite + Unpin)) -> i32 
 
 /// `case $key in [0-9a-f]{8}) ;; *) echo "no key id" >&2; exit 64 ;; esac`;
 /// any failure editing the keys file is a bare `exit 70`.
-async fn forget(key: Option<&str>, stderr: &mut (impl AsyncWrite + Unpin)) -> i32 {
+/// Returns the exit code and the outcome the call log records.
+async fn forget(key: Option<&str>, stderr: &mut (impl AsyncWrite + Unpin)) -> (i32, &'static str) {
     let Some(key) = key.filter(|k| is_key_id(k)) else {
-        return refuse(stderr, "no key id\n", EX_USAGE).await;
+        return (refuse(stderr, "no key id\n", EX_USAGE).await, "no_key");
     };
     match crate::keys::forget(key) {
-        Ok(_) => 0,
-        Err(_) => EX_SOFTWARE,
+        Ok(true) => (0, "removed"),
+        Ok(false) => (0, "not_found"),
+        Err(_) => (EX_SOFTWARE, "error"),
     }
 }
 

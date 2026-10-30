@@ -822,6 +822,30 @@ fn third_concurrent_legacy_run_is_busy() {
 }
 
 #[test]
+fn forget_logs_one_metadata_line() {
+    // Ruling R21: one line per forget, as for MCP's forget_key. The keys
+    // stub (Task 7 implements) finds nothing to remove.
+    let fx = Fx::new(false);
+    let (code, _, _) = forced(&fx, Some("3f2a9b1c"), "jodd-ai-run 2 forget", b"");
+    assert_eq!(code, 0);
+    let (code, _, _) = forced(&fx, None, "jodd-ai-run 2 forget", b"");
+    assert_eq!(code, 64);
+    let log = std::fs::read_to_string(fx.path("calls.log")).unwrap();
+    let lines: Vec<_> = log.lines().collect();
+    assert_eq!(lines.len(), 2, "{log}");
+    assert!(
+        lines[0].contains(" key=3f2a9b1c tool=jodd-ai-run-forget harness=- "),
+        "{log}"
+    );
+    assert!(lines[0].ends_with(" outcome=not_found"), "{log}");
+    assert!(
+        lines[1].contains(" key=- tool=jodd-ai-run-forget "),
+        "{log}"
+    );
+    assert!(lines[1].ends_with(" outcome=no_key"), "{log}");
+}
+
+#[test]
 fn forget_needs_an_eight_hex_key_id() {
     let fx = Fx::new(false);
     for key in [

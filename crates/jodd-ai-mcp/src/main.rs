@@ -100,7 +100,7 @@ async fn dispatch(args: Vec<String>) -> i32 {
         // future client's extra word) must fail loudly, not be served as
         // something else.
         Some("jodd-ai-mcp") if words.len() == 1 => {
-            let code = mcp::serve(key, policy::load(&policy_path())).await;
+            let code = mcp::serve(key, &policy_path()).await;
             // Ruling R9 (serve drains too; this covers any path that did not).
             run::drain_reaps().await;
             code

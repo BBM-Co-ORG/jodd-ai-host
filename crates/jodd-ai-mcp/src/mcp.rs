@@ -18,23 +18,38 @@
 //! scratch removed) by the client's `notifications/cancelled` for that request,
 //! and by stdin closing (the SSH channel going away). Before the process exits
 //! every pending reap is awaited (ruling R9).
+//!
+//! `tools/list` shows the policy as it was when the session started, but
+//! every `infer` re-reads the policy file and obeys that (ruling R19): an
+//! administrator's `disable` or lowered limit reaches a live session at its
+//! next call.
+//!
+//! Each incoming line is capped at `4 × max_request_bytes + 64 KiB` (ruling
+//! R20): a longer line ends the connection, so a client cannot make the
+//! server buffer without bound before `too_large` could even be decided.
 
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
+
+use futures::StreamExt;
 
 use rmcp::model::{
     CallToolRequestParams, CallToolResult, ContentBlock, Implementation, JsonObject,
     ListToolsResult, Meta, PaginatedRequestParams, ServerCapabilities, ServerInfo, Tool,
 };
-use rmcp::service::RequestContext;
+use rmcp::service::{RequestContext, RxJsonRpcMessage, TxJsonRpcMessage};
+use rmcp::transport::async_rw::{JsonRpcMessageCodec, JsonRpcMessageCodecError};
 use rmcp::{ErrorData, RoleServer, ServerHandler, ServiceExt};
 use serde_json::{json, Value};
 use tokio::io::{AsyncRead, ReadBuf};
+use tokio_util::bytes::BytesMut;
+use tokio_util::codec::{Decoder, FramedRead, FramedWrite};
 use tokio_util::sync::CancellationToken;
 
 use crate::harness;
-use crate::policy::{HarnessId, LoadOutcome, Policy};
+use crate::policy::{self, HarnessId, HarnessPolicy, LoadOutcome, Policy};
 use crate::run::{self, RunOutcome, RunRequest};
 use crate::slots::Slots;
 
@@ -49,26 +64,54 @@ const EX_PROTOCOL: i32 = 76;
 const INFER_ARGS: [&str; 5] = ["harness", "prompt", "system", "schema", "timeout_secs"];
 const DOCTOR: &str = "On the host, run `jodd-ai-host doctor`.";
 
+/// The longest request line accepted, from the session's policy (ruling R20).
+pub fn line_cap(max_request_bytes: u64) -> usize {
+    let cap = max_request_bytes
+        .saturating_mul(4)
+        .saturating_add(64 * 1024);
+    usize::try_from(cap).unwrap_or(usize::MAX)
+}
+
 /// Serve one MCP session on stdin/stdout; returns the process exit code.
-pub async fn serve(key: Option<&str>, load: LoadOutcome) -> i32 {
-    let policy = Policy::effective(&load);
-    // Cancelled when stdin ends: every run of this session stops with it.
+pub async fn serve(key: Option<&str>, policy_path: &Path) -> i32 {
+    let listed = Policy::effective(&policy::load(policy_path));
+    // Cancelled when stdin ends (or a line is over the cap): every run of
+    // this session stops with it.
     let session = CancellationToken::new();
     // Cancelled by `forget_key`: the server exits once its answer is out.
     let quit = CancellationToken::new();
+    let cap = line_cap(listed.max_request_bytes);
     let server = Server {
         key: key.map(str::to_string),
-        slots: Slots::new(policy.max_concurrent_runs),
-        policy,
-        load,
+        policy_path: policy_path.to_path_buf(),
+        listed,
         session: session.clone(),
         quit: quit.clone(),
     };
+    // rmcp's own stdio transport reads with an unbounded `read_until` (its
+    // codec's limit applies only to `FramedRead`), so read through
+    // `FramedRead` with the capped codec ourselves.
     let stdin = EofCancels {
         inner: tokio::io::stdin(),
         on_eof: session.clone(),
     };
-    let code = match server.serve((stdin, tokio::io::stdout())).await {
+    let over_cap = session.clone();
+    let incoming = FramedRead::new(stdin, CappedCodec::new(cap)).filter_map(move |m| {
+        // `FramedRead` ends after its first error: an over-cap line (or a
+        // read error) closes the connection.
+        std::future::ready(match m {
+            Ok(m) => Some(m),
+            Err(_) => {
+                over_cap.cancel();
+                None
+            }
+        })
+    });
+    let outgoing = FramedWrite::new(
+        tokio::io::stdout(),
+        JsonRpcMessageCodec::<TxJsonRpcMessage<RoleServer>>::default(),
+    );
+    let code = match server.serve((outgoing, incoming)).await {
         Ok(service) => {
             let stop = service.cancellation_token();
             // rmcp's cancel path still sends every response already made
@@ -91,9 +134,10 @@ pub async fn serve(key: Option<&str>, load: LoadOutcome) -> i32 {
 
 struct Server {
     key: Option<String>,
-    load: LoadOutcome,
-    policy: Policy,
-    slots: Slots,
+    /// Re-read by every `infer` (ruling R19).
+    policy_path: PathBuf,
+    /// The policy at session start: what `tools/list` shows.
+    listed: Policy,
     session: CancellationToken,
     quit: CancellationToken,
 }
@@ -158,7 +202,7 @@ impl ServerHandler for Server {
     ) -> Result<ListToolsResult, ErrorData> {
         let enabled: Vec<HarnessId> = HarnessId::all()
             .into_iter()
-            .filter(|h| self.policy.enabled(*h).is_some())
+            .filter(|h| self.listed.enabled(*h).is_some())
             .collect();
         let mut tools = Vec::new();
         if !enabled.is_empty() {
@@ -198,15 +242,18 @@ impl Server {
             Ok(a) => a,
             Err(msg) => return Done::invalid(None, msg),
         };
+        // Every call obeys the policy as it is now, not as it was listed.
+        let load = policy::load(&self.policy_path);
+        let policy = Policy::effective(&load);
         let known = HarnessId::from_name(&a.harness);
-        let (id, cfg) = match self.resolve(known) {
+        let (id, cfg) = match resolve(&load, &policy, known) {
             Ok(x) => x,
             Err(text) => return Done::failed(known, "not_enabled", text, json!({})),
         };
 
         let stdin = harness::join_prompt(a.system.as_deref(), &a.prompt);
         let size = stdin.len() as u64 + a.schema.as_ref().map_or(0, |s| s.len() as u64);
-        let max = self.policy.max_request_bytes;
+        let max = policy.max_request_bytes;
         if size > max {
             let text = format!(
                 "the request is {size} bytes; this AI host accepts at most {max} \
@@ -217,10 +264,11 @@ impl Server {
 
         // Only now, right before the CLI starts; a full house is refused at
         // once, never queued.
-        let Some(_slot) = self.slots.try_acquire() else {
+        // Slots are counted per call, so a lowered limit applies at once.
+        let Some(_slot) = Slots::new(policy.max_concurrent_runs).try_acquire() else {
             let text = format!(
                 "the AI host is busy: its {} run slot(s) are all taken. Try again shortly.",
-                self.policy.max_concurrent_runs
+                policy.max_concurrent_runs
             );
             return Done::failed(Some(id), "busy", text, json!({}));
         };
@@ -313,33 +361,6 @@ impl Server {
         }
     }
 
-    /// The enabled harness's policy, or the `not_enabled` text: doctor for a
-    /// policy that did not load, the enable command for a known harness.
-    fn resolve(
-        &self,
-        known: Option<HarnessId>,
-    ) -> Result<(HarnessId, &crate::policy::HarnessPolicy), String> {
-        match (&self.load, known) {
-            (LoadOutcome::Missing, _) => Err(format!(
-                "this AI host has no policy file, so nothing is enabled. {DOCTOR}"
-            )),
-            (LoadOutcome::Invalid(_), _) => Err(format!(
-                "this AI host's policy file is invalid, so nothing is enabled. {DOCTOR}"
-            )),
-            (LoadOutcome::Loaded(_), None) => Err(format!(
-                "this AI host does not offer that harness. {DOCTOR}"
-            )),
-            (LoadOutcome::Loaded(_), Some(id)) => match self.policy.enabled(id) {
-                Some(cfg) => Ok((id, cfg)),
-                None => Err(format!(
-                    "{0} is not enabled on this AI host. Ask its administrator to run \
-                     `sudo jodd-ai-host enable {0}` (`jodd-ai-host doctor` shows why).",
-                    id.as_str()
-                )),
-            },
-        }
-    }
-
     /// Always available, never subject to policy: a client must always be able
     /// to revoke itself. The server exits once the answer is out.
     fn forget_key(&self, args: Option<&JsonObject>) -> Done {
@@ -379,6 +400,34 @@ impl Server {
         };
         self.quit.cancel();
         done
+    }
+}
+
+/// The enabled harness's policy, or the `not_enabled` text: doctor for a
+/// policy that did not load, the enable command for a known harness.
+fn resolve<'p>(
+    load: &LoadOutcome,
+    policy: &'p Policy,
+    known: Option<HarnessId>,
+) -> Result<(HarnessId, &'p HarnessPolicy), String> {
+    match (load, known) {
+        (LoadOutcome::Missing, _) => Err(format!(
+            "this AI host has no policy file, so nothing is enabled. {DOCTOR}"
+        )),
+        (LoadOutcome::Invalid(_), _) => Err(format!(
+            "this AI host's policy file is invalid, so nothing is enabled. {DOCTOR}"
+        )),
+        (LoadOutcome::Loaded(_), None) => Err(format!(
+            "this AI host does not offer that harness. {DOCTOR}"
+        )),
+        (LoadOutcome::Loaded(_), Some(id)) => match policy.enabled(id) {
+            Some(cfg) => Ok((id, cfg)),
+            None => Err(format!(
+                "{0} is not enabled on this AI host. Ask its administrator to run \
+                 `sudo jodd-ai-host enable {0}` (`jodd-ai-host doctor` shows why).",
+                id.as_str()
+            )),
+        },
     }
 }
 
@@ -500,6 +549,49 @@ fn forget_key_tool() -> Tool {
         object(schema),
     )
     .with_meta(tool_meta())
+}
+
+/// rmcp's line codec, with unparsable lines skipped as rmcp's own stdio
+/// transport does (an invalid line is not worth a dropped session); only an
+/// over-cap line or a read error is an error, and that ends the stream.
+struct CappedCodec {
+    inner: JsonRpcMessageCodec<RxJsonRpcMessage<RoleServer>>,
+}
+
+impl CappedCodec {
+    fn new(max_line: usize) -> Self {
+        CappedCodec {
+            inner: JsonRpcMessageCodec::new_with_max_length(max_line),
+        }
+    }
+}
+
+impl Decoder for CappedCodec {
+    type Item = RxJsonRpcMessage<RoleServer>;
+    type Error = JsonRpcMessageCodecError;
+
+    fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        loop {
+            match self.inner.decode(buf) {
+                // The bad line is already consumed: try the next one.
+                Err(JsonRpcMessageCodecError::Serde(_)) => continue,
+                // A skipped (non-MCP) notification returns `None` even when
+                // more whole lines are buffered: go on to them.
+                Ok(None) if buf.contains(&b'\n') => continue,
+                other => return other,
+            }
+        }
+    }
+
+    fn decode_eof(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        loop {
+            match self.inner.decode_eof(buf) {
+                Err(JsonRpcMessageCodecError::Serde(_)) => continue,
+                Ok(None) if buf.contains(&b'\n') => continue,
+                other => return other,
+            }
+        }
+    }
 }
 
 /// stdin that cancels `on_eof` when it ends (or fails): the client is gone,
