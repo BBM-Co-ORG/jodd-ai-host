@@ -252,5 +252,24 @@ out=$(homes "$sg" 1)
 case $out in *"jodd-ai is STILL in the staff group, so it can enter these home folders"*) ok ;; *) bad "post-check failed, but the text does not say so: [$out]" ;; esac
 check "listing the homes changed no mode" "$(modeof "$t/Users/alice") $(modeof "$t/Users/bob")" "drwxr-x--- drwxr-xr-x"
 
+# 12. jodd-ai-mcp on a Mac: the release target for each Mac (Rosetta included), installed
+# root:wheel through lib/mcp.sh (the same code as Linux, tested in helper_test.sh), and planned,
+# not done, by a dry run.
+mkdir -p "$t/bin3"
+printf '#!/bin/sh\ncase $1 in -s) echo Darwin ;; -m) echo "$FAKE_ARCH" ;; esac\n' > "$t/bin3/uname"
+printf '#!/bin/sh\n[ "$2" = sysctl.proc_translated ] && echo "${FAKE_ROSETTA:-0}"\n' > "$t/bin3/sysctl"
+chmod +x "$t/bin3/uname" "$t/bin3/sysctl"
+tgt() { PATH="$t/bin3:$PATH" sh -c '. "$1"; warn() { echo "WARN: $*"; }; mcp_target' sh "$here/lib/mcp.sh"; }
+check "target: Apple silicon" "$(FAKE_ARCH=arm64 tgt)" "aarch64-apple-darwin"
+check "target: Intel Mac" "$(FAKE_ARCH=x86_64 tgt)" "x86_64-apple-darwin"
+check "target: a Rosetta shell on Apple silicon gets the native binary" "$(FAKE_ARCH=x86_64 FAKE_ROSETTA=1 tgt)" "aarch64-apple-darwin"
+if grep -q 'mcp_install /usr/local/bin/jodd-ai-mcp wheel' "$here/install/macos.sh"; then ok; else bad "macos.sh does not install jodd-ai-mcp root:wheel"; fi
+if grep -q 'mcp_policy_init wheel' "$here/install/macos.sh"; then ok; else bad "macos.sh does not set up the policy as root:wheel"; fi
+if grep -q 'fetch lib/mcp.sh' "$here/install/macos.sh"; then ok; else bad "macos.sh does not fetch lib/mcp.sh"; fi
+# the binary step, the policy step, the log dir and auto-enable are dry-run aware
+for want in 'download jodd-ai-mcp' 'empty policy.toml' 'create /var/log/jodd-ai-host' 'jodd-ai-host auto-enable'; do
+  if grep -q "plan \".*$want" "$here/install/macos.sh"; then ok; else bad "macos.sh has no dry-run plan for: $want"; fi
+done
+
 echo "macos tests: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

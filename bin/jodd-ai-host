@@ -33,8 +33,15 @@ HOMEDIR=${JODD_AI_HOME:-}
 need_home() {
   [ -n "$HOMEDIR" ] || HOMEDIR=$(home_of "$U")
   [ -n "$HOMEDIR" ] || die "cannot find the home directory of $U."
+  case $HOMEDIR in /*) ;; *) die "the home directory of $U ($HOMEDIR) is not an absolute path." ;; esac
   AK="$HOMEDIR/.ssh/authorized_keys"
 }
+
+# The server binary and its policy. JODD_AI_MCP_BIN and JODD_AI_MCP_POLICY are test seams (a
+# release build of jodd-ai-mcp ignores JODD_AI_MCP_POLICY and always reads the default).
+MCP=${JODD_AI_MCP_BIN:-/usr/local/bin/jodd-ai-mcp}
+POLICY=${JODD_AI_MCP_POLICY:-/etc/jodd-ai-host/policy.toml}
+need_mcp() { [ -x "$MCP" ] || die "jodd-ai-mcp is not installed at $MCP. Re-run the installer (it installs it), then: jodd-ai-host doctor"; }
 
 # The account's login shell, from the user database. Falls back to /bin/sh for a missing or
 # non-login shell (nologin, false). JODD_AI_SHELL overrides it (tests).
@@ -207,6 +214,45 @@ install_clis() {
   return $_rc
 }
 
+# Run `jodd-ai-mcp admin adopt-keys|scan-keys` AS THE ACCOUNT: they read or edit its own
+# ~/.ssh/authorized_keys, which root never opens (a planted link could point anywhere). The
+# environment is emptied but for PATH and an absolute HOME, the account's, which is the file
+# the binary works on - in every branch of run_as_account, the same-user one included.
+mcp_as_account() {
+  run_as_account "exec env -i PATH=/usr/bin:/bin HOME=$(sq "$HOMEDIR") $(sq "$MCP") admin $1"
+}
+# One harness's state in the policy: enabled | disabled | undecided (nothing when the policy is
+# invalid or the binary is missing).
+mcp_state() { "$MCP" admin list 2>/dev/null | awk -v n="$1" '$1 == n { print $2 }'; }
+
+# Where a CLI is and the PATH it runs with, found as the account the way Jodd's Setup probed
+# (Jodd's install.rs PROBE_PATHS / parse_probe_paths): its login shell (-lc) first, then a login
+# + interactive one (-lic, for nvm-style setups only ~/.bashrc knows). Answer lines carry a
+# prefix after a newline, so a chatty profile cannot be mistaken for one. A CLI path must be
+# absolute (`command -v` prints a bare name or `alias ...` otherwise); a PATH is taken as it
+# comes. The PATH is the interactive one when the CLI was found only there, else the login one.
+# Sets PROBED_PATH and PROBED_PATH_ENV; returns 1 when the CLI is not found.
+# shellcheck disable=SC2016  # the $ are for the account's shell
+probe_cli() {
+  _out=
+  for _m in lc lic; do
+    _o=$(_as_user "$_m" "printf '\n@@JODD $_m PATH=%s\n' \"\$PATH\"; printf '\n@@JODD $_m $1=%s\n' \"\$(command -v $1 2>/dev/null)\"" </dev/null 2>/dev/null | grep '^@@JODD ')
+    _out="$_out
+$_o"
+  done
+  _pv() { printf '%s\n' "$_out" | sed -n "s|^@@JODD $1 $2=||p" | head -n 1 | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'; }
+  _abs() { _a=$(_pv "$1" "$2"); case $_a in /*) printf '%s\n' "$_a" ;; esac; }
+  _lc=$(_abs lc "$1") _lic=$(_abs lic "$1")
+  PROBED_PATH=${_lc:-$_lic}
+  [ -n "$PROBED_PATH" ] || return 1
+  if [ -z "$_lc" ]; then
+    PROBED_PATH_ENV=$(_pv lic PATH); [ -n "$PROBED_PATH_ENV" ] || PROBED_PATH_ENV=$(_pv lc PATH)
+  else
+    PROBED_PATH_ENV=$(_pv lc PATH); [ -n "$PROBED_PATH_ENV" ] || PROBED_PATH_ENV=$(_pv lic PATH)
+  fi
+  [ -n "$PROBED_PATH_ENV" ] || PROBED_PATH_ENV=/usr/local/bin:/usr/bin:/bin
+}
+
 # Commands:
 #   status                 what Jodd will find on this host
 #   fingerprint            the host key, as Jodd's setup screen shows it
@@ -215,10 +261,17 @@ install_clis() {
 #   lock | unlock          turn password login for the AI account off | on
 #   update-clis            reinstall / update both CLIs
 #   keys | revoke <id>     list Jodd's keys | remove one
+#   list                   which CLIs the policy lets Jodd run, and their paths
+#   enable claude|codex    find the CLI as the AI account and let Jodd run it
+#   disable claude|codex   stop Jodd running it (kept across re-installs and image updates)
+#   auto-enable            enable each CLI found that the policy has no decision for (installers)
+#   adopt-keys             re-point Jodd's older keys at jodd-ai-mcp (after upgrading the kit)
 #   doctor                 check everything Jodd needs and say what to fix
 
 cmd=${1:-}
 if [ $# -gt 0 ]; then shift; fi
+tmp_err=$(mktemp) || die "cannot create a temp file."
+trap 'rm -f "$tmp_err"' EXIT
 case $cmd in
   fingerprint) fingerprint || die "cannot read the host key at $JODD_AI_HOSTKEY." ;;
   status)
@@ -230,7 +283,35 @@ case $cmd in
     if grep -q 'PasswordAuthentication yes' "$JODD_AI_DROPIN" 2>/dev/null; then echo "password:   on (Jodd can run Setup / Update)"; else echo "password:   off (run: sudo jodd-ai-host unlock, before Setup / Update)"; fi
     for c in claude codex; do p=$(cli_path "$c"); if [ -n "$p" ]; then echo "$c:  $p ($(cli_version "$c"))"; else echo "$c:  not installed (run: sudo jodd-ai-host update-clis)"; fi; done
     n=$(grep -ac ' jodd-ai-[0-9a-f]\{8\}$' "$AK" 2>/dev/null)
-    echo "jodd keys:  ${n:-0}" ;;
+    echo "jodd keys:  ${n:-0}"
+    if [ -x "$MCP" ]; then
+      echo "jodd-ai-mcp: $("$MCP" --version 2>/dev/null || echo "does not run ($MCP); re-run the installer")"
+      # (a TOML error spans lines: flatten it to one)
+      lst=$("$MCP" admin list 2>"$tmp_err"); rc=$?; why=$(tr '\n' ' ' < "$tmp_err" 2>/dev/null | tr -s ' ')
+      if [ "$rc" -ne 0 ]; then
+        # "The policy at P is invalid (REASON), so nothing is enabled. ..."
+        r=$(printf '%s\n' "$why" | sed -n 's/^.* is invalid (\(.*\)), so nothing is enabled.*$/\1/p')
+        echo "policy:     invalid: ${r:-$why} (nothing is enabled; run: jodd-ai-host doctor)"
+      elif [ -n "$why" ]; then
+        echo "policy:     missing ($POLICY; nothing is enabled; run: sudo jodd-ai-host enable claude | codex)"
+      else
+        echo "policy:     ok ($POLICY)"
+      fi
+      printf '%s\n' "$lst" | sed 's/^/  /'
+      # Every jodd-ai-* line whose forced command is not jodd-ai-mcp, read as the account.
+      if scan=$(mcp_as_account scan-keys </dev/null 2>"$tmp_err"); then
+        printf '%s\n' "$scan" | while read -r id kind cmdline; do
+          case $kind in
+            legacy) echo "key jodd-ai-$id: not on jodd-ai-mcp (runs $cmdline); fix: sudo jodd-ai-host adopt-keys" ;;
+            other)  echo "key jodd-ai-$id: not on jodd-ai-mcp (runs $cmdline); adopt-keys cannot re-point it: edit it by hand, or sudo jodd-ai-host revoke $id" ;;
+          esac
+        done
+      else
+        echo "keys:       cannot read them as $U: $(cat "$tmp_err" 2>/dev/null)"
+      fi
+    else
+      echo "jodd-ai-mcp: not installed ($MCP); re-run the installer"
+    fi ;;
   signin)
     need_root
     case ${1:-} in
@@ -267,6 +348,37 @@ if [ "$s" -gt 1 ]; then rm -f "$n"; echo "jodd-ai-host: could not read $ak; noth
 if ! mv "$n" "$ak"; then rm -f "$n"; echo "jodd-ai-host: could not replace $ak; nothing was changed." >&2; exit 1; fi
 echo "Removed key jodd-ai-$id."'
     run_as_account "ak=$(sq "$AK"); id=$1; $_body" ;;
+  list) need_mcp; "$MCP" admin list ;;
+  enable)
+    need_root
+    case ${1:-} in claude|codex) ;; *) usage ;; esac
+    need_mcp; need_home
+    probe_cli "$1" || die "$1 is not installed for $U (its login shell does not find it). Install it: sudo jodd-ai-host update-clis"
+    "$MCP" admin enable "$1" --path "$PROBED_PATH" --path-env "$PROBED_PATH_ENV" ;;
+  disable)
+    need_root
+    case ${1:-} in claude|codex) ;; *) usage ;; esac
+    need_mcp; "$MCP" admin disable "$1" ;;
+  auto-enable)
+    # The installers and the image run this. A harness the policy has decided on (enabled or
+    # disabled) is left alone; an undecided one is enabled when its CLI is found.
+    need_root; need_mcp; need_home
+    # An invalid policy is never overwritten: say why (admin list does) and change nothing.
+    "$MCP" admin list >/dev/null 2>"$tmp_err" || { cat "$tmp_err" >&2; exit 1; }
+    rc=0
+    for c in claude codex; do
+      st=$(mcp_state "$c")
+      case $st in
+        enabled|disabled) echo "$c: already $st in the policy; left as it is." ;;
+        *)
+          if probe_cli "$c"; then "$MCP" admin auto-enable "$c" --path "$PROBED_PATH" --path-env "$PROBED_PATH_ENV" || rc=1
+          else echo "$c: not installed for $U yet; left undecided."; fi ;;
+      esac
+    done
+    exit $rc ;;
+  adopt-keys)
+    need_root; need_mcp; need_home
+    mcp_as_account adopt-keys ;;
   doctor) need_home; # shellcheck disable=SC1091
           . "$JODD_AI_LIB/doctor.sh"; doctor ;;
   *) usage ;;

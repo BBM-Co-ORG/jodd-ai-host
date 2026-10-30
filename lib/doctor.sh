@@ -5,6 +5,12 @@ _d_bad=0
 _d_ok()   { echo "ok    $*"; }
 _d_note() { echo "note  $*"; }
 _d_fix()  { echo "FIX   $*"; _d_bad=1; }
+_d_warn() { echo "WARN  $*"; }
+# The uid that owns PATH (following a link), and its mode string.
+# shellcheck disable=SC2012  # one named file; only the owner and mode columns are read
+_d_uid()  { ls -lnL "$1" 2>/dev/null | awk 'NR == 1 { print $3 }'; }
+# shellcheck disable=SC2012
+_d_mode() { ls -lL "$1" 2>/dev/null | awk 'NR == 1 { print substr($1, 1, 10) }'; }
 
 doctor() {
   _d_bad=0
@@ -101,7 +107,74 @@ EOP
     fi
   done
 
-  # 6. the fingerprint Jodd will ask you to confirm
+  # 6. jodd-ai-mcp, the forced command of every Jodd key: present, root's, and only root's to change
+  if [ ! -x "$MCP" ]; then
+    _d_fix "jodd-ai-mcp is not installed at $MCP. Re-run the installer (it downloads and verifies it)."
+  else
+    _mv=$("$MCP" --version 2>/dev/null) || _mv=
+    case $_mv in
+      "jodd-ai-mcp "*) _d_ok "$_mv installed ($MCP)" ;;
+      *) _d_fix "$MCP does not run on this machine. Re-run the installer." ;;
+    esac
+    _mu=$(_d_uid "$MCP") _mm=$(_d_mode "$MCP")
+    if [ "$_mu" != 0 ]; then _d_fix "$MCP is owned by uid ${_mu:-?}, not root: whoever owns it decides what Jodd's keys run. Re-run the installer (it installs it root-owned)."
+    else case $_mm in ?????w????|????????w?) _d_fix "$MCP ($_mm) can be changed by others than root. Run: sudo chmod 755 $MCP" ;; *) _d_ok "$MCP is root-owned ($_mm)" ;; esac; fi
+  fi
+
+  # 7. the policy: valid, readable by the account (the server reads it as the account), and not
+  # writable by it (else the account decides what Jodd may run). In Docker it is a link into the
+  # state volume; the checks follow it, and the directory that holds the real file counts too.
+  _pr=$POLICY
+  if [ -L "$_pr" ]; then
+    _pt=$(readlink "$_pr")
+    case $_pt in /*) _pr=$_pt ;; *) _pr=$(dirname "$POLICY")/$_pt ;; esac
+  fi
+  if [ ! -e "$POLICY" ]; then
+    _d_fix "there is no policy at $POLICY, so Jodd may run nothing. Run: sudo jodd-ai-host enable claude (or codex)"
+  else
+    if [ -x "$MCP" ]; then
+      if _pe=$("$MCP" admin list 2>&1 >/dev/null); then
+        _d_ok "the policy at $POLICY is valid"
+        "$MCP" admin list 2>/dev/null | while read -r _h _st _hp; do _d_note "$_h: $_st${_hp:+ ($_hp)}"; done
+      else
+        _d_fix "$(printf '%s' "$_pe" | tr '\n' ' ' | tr -s ' ')"
+      fi
+    fi
+    if run_as_account "[ -r $(sq "$POLICY") ]" </dev/null >/dev/null 2>&1; then _d_ok "$U can read the policy"
+    else _d_fix "$U cannot read $POLICY, so jodd-ai-mcp (which runs as $U) enables nothing. Run: sudo chmod 644 $_pr"; fi
+    if run_as_account "[ -w $(sq "$_pr") ] || [ -w $(sq "$(dirname "$_pr")") ]" </dev/null >/dev/null 2>&1; then
+      _d_fix "$U can change the policy ($_pr or its directory is writable by it), so the account decides what Jodd may run. Make both root's: sudo chown root $_pr $(dirname "$_pr"); sudo chmod 644 $_pr; sudo chmod 755 $(dirname "$_pr")"
+    else
+      _d_ok "$U cannot change the policy"
+    fi
+    if [ "$(_d_uid "$_pr")" != 0 ]; then _d_fix "$_pr is not owned by root. Run: sudo chown root $_pr"; fi
+    if grep -Eq '^[[:space:]]*max_concurrent_runs[[:space:]]*=[[:space:]]*0[[:space:]]*(#.*)?$' "$_pr" 2>/dev/null; then
+      _d_fix "the policy sets max_concurrent_runs = 0, so every call is refused as busy. Remove the line (default 2) or raise it."
+    fi
+  fi
+
+  # 8. Jodd's keys: each should run jodd-ai-mcp. Read as the account (root never opens its file).
+  if [ -x "$MCP" ]; then
+    if _ks=$(mcp_as_account scan-keys </dev/null 2>&1); then
+      _kn=0
+      while read -r _id _kind _kc; do
+        [ -n "$_id" ] || continue
+        _kn=$((_kn + 1))
+        case $_kind in
+          mcp) ;;
+          legacy) _d_warn "key jodd-ai-$_id still runs an older helper ($_kc). Run: sudo jodd-ai-host adopt-keys" ;;
+          *) _d_warn "key jodd-ai-$_id does not run jodd-ai-mcp (${_kc}); adopt-keys cannot re-point it. Edit it by hand, or: sudo jodd-ai-host revoke $_id" ;;
+        esac
+      done <<EOK
+$_ks
+EOK
+      _d_ok "Jodd keys read as $U ($_kn found)"
+    else
+      _d_fix "cannot read $U's keys: $_ks"
+    fi
+  fi
+
+  # 9. the fingerprint Jodd will ask you to confirm
   if _fp=$(fingerprint); then _d_ok "host key: $_fp"; else _d_fix "cannot read the host key at $JODD_AI_HOSTKEY."; fi
 
   return $_d_bad

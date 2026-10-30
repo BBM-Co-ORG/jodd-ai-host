@@ -40,6 +40,8 @@ jobs:
           test/*.sh
           test/e2e/*.sh
           test/docker/run-tests.sh
+      # the helper tests drive a debug build of jodd-ai-mcp (they build it themselves)
+      - uses: dtolnay/rust-toolchain@stable
       - name: helper tests
         run: sh test/helper_test.sh
       - name: macOS installer tests
@@ -47,3 +49,12 @@ jobs:
       # test/e2e/ needs Docker, the network and a checkout of the Jodd app repo
       # (it runs Jodd's own setup code against the host); it is linted above and
       # run by hand, never here.
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # builds docker/Dockerfile (jodd-ai-mcp compiled for musl inside it) and checks the
+      # entrypoint's policy, log dir and auto-enable; the container has no network
+      - name: image smoke test
+        run: sh test/image_smoke.sh
