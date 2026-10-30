@@ -216,7 +216,9 @@ What it does, in order:
    checks its SHA-256 and its version, and installs it as
    `/usr/local/bin/jodd-ai-mcp`, owned by root. It creates an empty policy,
    `/etc/jodd-ai-host/policy.toml`, if there is none. If the download fails,
-   it stops before it changes any account or SSH setting.
+   it stops before it changes any account or SSH setting. The helper
+   `jodd-ai-host` and its files come from that same release (never from
+   `main`), so the kit and `jodd-ai-mcp` always match.
 3. Creates the account `jodd-ai` with `bash` as its login shell, and puts
    `~/.local/bin` on its login `PATH`.
 4. Sets the account's password.
@@ -245,7 +247,7 @@ Settings you can pass to the installer:
 | `JODD_AI_PASSWORD` | The password, for a run without a terminal. A later run applies it again only if you change it. |
 | `JODD_AI_PORT` | Only the port the summary shows (for example a port you forward). It does not change sshd's port. |
 | `JODD_AI_SKIP_CLIS=1` | Skip the CLI install, for a machine without internet. Install them later with `sudo jodd-ai-host update-clis`, then `sudo jodd-ai-host enable claude` (and `codex`). |
-| `JODD_AI_MCP_VERSION` | Install this version of `jodd-ai-mcp` (for example `1.0.0`) instead of the latest release. |
+| `JODD_AI_MCP_VERSION` | Install this release (for example `1.0.0`) instead of the latest: `jodd-ai-mcp` and the helper's files both come from it. |
 
 Put them between `sudo` and `sh`, for example:
 
@@ -475,22 +477,23 @@ the same line as before. If anything is wrong, undo steps 3 and 4.
 **6. Reload sshd** the way your system does it, for example `sudo systemctl
 reload sshd`, `sudo rc-service sshd reload` or `sudo service sshd reload`.
 
-**7. Install the helper.**
+**7. Install the helper.** Take it from the same release as `jodd-ai-mcp` in
+step 8 (here `v1.0.0`), not from `main`.
 
 ```sh
 sudo mkdir -p /usr/local/lib/jodd-ai-host
 ```
 
 ```sh
-sudo curl -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/main/bin/jodd-ai-host -o /usr/local/bin/jodd-ai-host
+sudo curl -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/v1.0.0/bin/jodd-ai-host -o /usr/local/bin/jodd-ai-host
 ```
 
 ```sh
-sudo curl -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/main/lib/dropin.sh -o /usr/local/lib/jodd-ai-host/dropin.sh
+sudo curl -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/v1.0.0/lib/dropin.sh -o /usr/local/lib/jodd-ai-host/dropin.sh
 ```
 
 ```sh
-sudo curl -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/main/lib/doctor.sh -o /usr/local/lib/jodd-ai-host/doctor.sh
+sudo curl -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/v1.0.0/lib/doctor.sh -o /usr/local/lib/jodd-ai-host/doctor.sh
 ```
 
 ```sh

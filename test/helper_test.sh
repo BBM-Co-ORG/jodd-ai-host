@@ -624,6 +624,42 @@ check "target: Linux x86_64" "$(FAKE_ARCH=x86_64 PATH="$t/uname:$PATH" "$MI" mcp
 check "target: Linux aarch64" "$(FAKE_ARCH=aarch64 PATH="$t/uname:$PATH" "$MI" mcp_target)" "aarch64-unknown-linux-musl"
 FAKE_ARCH=riscv64 PATH="$t/uname:$PATH" "$MI" mcp_target >/dev/null 2>&1; check "target: an unsupported machine (rc)" "$?" "1"
 
+# kit_release (both installers): bin/ and lib/ come from the same release tag as the binary, never
+# from main. A fake curl answers the /releases/latest redirect with $FAKE_URL (or fails without it)
+# and logs each call.
+mkdir -p "$t/kitcurl"
+cat > "$t/kitcurl/curl" <<FAKE
+#!/bin/sh
+echo call >> "$t/kitcurl.log"
+[ -n "\${FAKE_URL:-}" ] || exit 22
+printf '%s' "\$FAKE_URL"
+FAKE
+chmod +x "$t/kitcurl/curl"
+for inst in linux macos; do
+  f=$here/install/$inst.sh
+  fnk=$(sed -n '/^kit_release() {/,/^}/p' "$f")
+  if [ -n "$fnk" ]; then ok; else bad "$inst.sh has no kit_release"; continue; fi
+  printf '%s\n' 'warn() { echo "$*" >&2; }' "$fnk" \
+    'kit_url=${JODD_AI_KIT_URL:-unset}; kit_release; rc=$?; echo "rc=$rc url=$kit_url ver=${JODD_AI_MCP_VERSION:-}"' > "$t/kr-$inst.sh"
+  # kr LOCAL_KIT JODD_AI_MCP_VERSION JODD_AI_KIT_URL [FAKE_URL]
+  kr() { : > "$t/kitcurl.log"; env PATH="$t/kitcurl:$PATH" local_kit="$1" JODD_AI_MCP_VERSION="$2" JODD_AI_KIT_URL="$3" FAKE_URL="${4:-}" sh "$t/kr-$inst.sh" 2>/dev/null; }
+  raw=https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host
+  check "$inst kit: the latest release's tag" \
+    "$(kr '' '' '' https://github.com/BBM-Co-ORG/jodd-ai-host/releases/tag/v1.2.3)" "rc=0 url=$raw/v1.2.3 ver=1.2.3"
+  check "$inst kit: a pinned version's tag, without asking for the latest" \
+    "$(kr '' v1.0.0 '') calls=$(wc -l < "$t/kitcurl.log" | tr -d ' ')" "rc=0 url=$raw/v1.0.0 ver=1.0.0 calls=0"
+  check "$inst kit: JODD_AI_KIT_URL wins" "$(kr '' 9.9.9 file:///kit)" "rc=0 url=file:///kit ver=9.9.9"
+  check "$inst kit: a checkout's own kit" "$(kr /src '' '')" "rc=0 url=unset ver="
+  check "$inst kit: no network, no kit" "$(kr '' '' '' | cut -d' ' -f1)" "rc=1"
+  check "$inst kit: a latest that is not a version" \
+    "$(kr '' '' '' https://github.com/BBM-Co-ORG/jodd-ai-host/releases | cut -d' ' -f1)" "rc=1"
+  hasnt "$inst.sh: no kit from main" "$(cat "$f")" 'jodd-ai-host/main}'
+  # resolved before the first fetch
+  first_kr=$(grep -n '^kit_release ||' "$f" | head -n 1 | cut -d: -f1)
+  first_fetch=$(grep -n '^fetch bin/jodd-ai-host' "$f" | head -n 1 | cut -d: -f1)
+  if [ -n "$first_kr" ] && [ -n "$first_fetch" ] && [ "$first_kr" -lt "$first_fetch" ]; then ok; else bad "$inst.sh: kit_release does not run before the kit is fetched"; fi
+done
+
 # usage
 sh "$H" nosuchcommand >/dev/null 2>&1; check "unknown command exits 2" "$?" "2"
 

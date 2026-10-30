@@ -35,7 +35,8 @@ program the host owns, under a policy only the administrator can change.
 
 - The installers download `jodd-ai-mcp` from the release, verify its SHA-256
   and require it to report the version asked for, before they change anything
-  else. Re-running an installer upgrades it.
+  else. Re-running an installer upgrades it. The helper and its files come
+  from the same release (its tag, never `main`), so they always match the binary.
 - The Docker image builds `jodd-ai-mcp` in, and keeps the policy across
   `docker compose pull`.
 - A run that is cancelled, times out or loses its client, or whose server is

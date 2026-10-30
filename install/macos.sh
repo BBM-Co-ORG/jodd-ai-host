@@ -53,8 +53,8 @@
 #                     account's password is never changed (sudo jodd-ai-host password).
 #   JODD_AI_PORT      only what the final summary reports (e.g. a forwarded port)
 #   JODD_AI_KIT_URL   where bin/ and lib/ are fetched from when this script is not run
-#                     from a checkout of the kit
-#                     (default https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/main)
+#                     from a checkout of the kit (default: the release jodd-ai-mcp comes from,
+#                     https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/v<version>)
 #   JODD_AI_SKIP_CLIS=1   do not install claude / codex (offline runs; `jodd-ai-host update-clis` later)
 #   JODD_AI_MCP_VERSION   install this jodd-ai-mcp release (e.g. 1.0.0); default: the latest
 #
@@ -80,7 +80,7 @@ cd /
 
 user=${JODD_AI_USER:-jodd-ai}
 fullname="Jodd AI host"
-kit_url=${JODD_AI_KIT_URL:-https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/main}
+kit_url=${JODD_AI_KIT_URL:-}   # set by kit_release below unless given
 sshd=/usr/sbin/sshd
 sshd_config=/etc/ssh/sshd_config
 dropin_dir=/etc/ssh/sshd_config.d
@@ -165,6 +165,28 @@ say "macOS $macos_version"
 work=$(mktemp -d) || die "cannot create a temp directory."
 
 # --- bin/ and lib/ come from this checkout if we run from one (local_kit, found above), else the kit URL
+# bin/ and lib/ always come from the same release as jodd-ai-mcp: from a checkout of the kit, the
+# checkout's own files; else the tag v<version> of the release the binary is downloaded from
+# (JODD_AI_MCP_VERSION, or the latest, resolved once here so the kit and the binary agree), never
+# main, which can be ahead of the release. JODD_AI_KIT_URL, when set, is used as it is.
+kit_release() {
+  { [ -z "$local_kit" ] && [ -z "${JODD_AI_KIT_URL:-}" ]; } || return 0
+  _kv=${JODD_AI_MCP_VERSION:-}
+  if [ -z "$_kv" ]; then
+    _ku=$(curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/BBM-Co-ORG/jodd-ai-host/releases/latest) || _ku=
+    _kv=${_ku##*/}
+  fi
+  _kv=${_kv#v}
+  case $_kv in
+    *[!0-9A-Za-z.+-]*|'') _kv=bad ;;
+  esac
+  case $_kv in
+    [0-9]*.[0-9]*.[0-9]*) ;;
+    *) warn "cannot tell which jodd-ai-host release to install (no network?). Pin one with JODD_AI_MCP_VERSION=<version> (like 1.0.0), or run this installer from a checkout of the kit."; return 1 ;;
+  esac
+  JODD_AI_MCP_VERSION=$_kv; export JODD_AI_MCP_VERSION
+  kit_url=https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/v$_kv
+}
 
 # ---------------------------------------------------------------- helper files ----------
 # Fetched/copied first so everything below can use render_dropin. A dry run fetches them too (a
@@ -177,6 +199,8 @@ fetch() { # $1 path under the kit, $2 destination
   fi
   if [ ! -s "$2" ] || ! sh -n "$2"; then die "$1 from the kit is empty or not a shell script; nothing was installed."; fi
 }
+# After the packages (curl may be one of them), before the first fetch.
+kit_release || die "the kit was not fetched (message above); no account, sshd or jodd-ai-mcp setting was changed."
 mkdir -p "$work/kit/bin" "$work/kit/lib"
 fetch bin/jodd-ai-host "$work/kit/bin/jodd-ai-host"
 fetch lib/dropin.sh "$work/kit/lib/dropin.sh"
