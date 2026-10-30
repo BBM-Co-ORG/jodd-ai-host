@@ -40,43 +40,6 @@ const KILL_GRACE: Duration = Duration::from_secs(5);
 const GONE_WAIT: Duration = Duration::from_secs(2);
 const POLL: Duration = Duration::from_millis(20);
 
-/// The only variables the CLI inherits, besides `PATH` (which is the policy's
-/// `path_env`) and `LC_*`. Wrapper v2 passed the whole sshd environment on;
-/// this keeps what a CLI needs in an sshd session: the login identity (HOME
-/// is where both CLIs keep their sign-in), locale, temp dir, the CLIs' own
-/// config-dir and API-key variables, proxies and CA bundles.
-const ENV_PASSTHROUGH: &[&str] = &[
-    "HOME",
-    "USER",
-    "LOGNAME",
-    "SHELL",
-    "TMPDIR",
-    "TZ",
-    "LANG",
-    "LANGUAGE",
-    "TERM",
-    "XDG_CONFIG_HOME",
-    "XDG_DATA_HOME",
-    "XDG_CACHE_HOME",
-    "XDG_STATE_HOME",
-    "XDG_RUNTIME_DIR",
-    "CLAUDE_CONFIG_DIR",
-    "ANTHROPIC_API_KEY",
-    "CODEX_HOME",
-    "OPENAI_API_KEY",
-    "HTTP_PROXY",
-    "HTTPS_PROXY",
-    "NO_PROXY",
-    "ALL_PROXY",
-    "http_proxy",
-    "https_proxy",
-    "no_proxy",
-    "all_proxy",
-    "SSL_CERT_FILE",
-    "SSL_CERT_DIR",
-    "NODE_EXTRA_CA_CERTS",
-];
-
 pub struct RunRequest<'a> {
     pub def: &'static HarnessDef,
     pub cfg: &'a HarnessPolicy,
@@ -168,9 +131,9 @@ async fn run_in(
 
     let mut cmd = Command::new(&req.cfg.path);
     cmd.args(argv)
-        .env_clear()
+        // Wrapper v2 parity (ruling R11): inherit the server's environment
+        // (HOME and the CLIs' own variables among it), override only PATH.
         .env("PATH", &req.cfg.path_env)
-        .envs(std::env::vars_os().filter(|(k, _)| passes_through(k)))
         .current_dir(d.join("work"))
         .stdin(Stdio::from(File::open(d.join("prompt"))?))
         // Files, not pipes, like wrapper v2: a grandchild that keeps a pipe
@@ -261,11 +224,6 @@ fn is_runnable(path: &str) -> bool {
     p.is_absolute()
         && fs::metadata(p).map(|m| m.is_file()).unwrap_or(false)
         && access(p, AccessFlags::X_OK).is_ok()
-}
-
-fn passes_through(k: &OsStr) -> bool {
-    let k = k.to_string_lossy();
-    ENV_PASSTHROUGH.contains(&&*k) || k.starts_with("LC_")
 }
 
 fn lossy(b: Vec<u8>) -> String {
@@ -664,7 +622,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn child_env_is_cleared_but_for_path_and_passthrough() {
+    async fn child_env_is_inherited_with_path_overridden() {
+        // Wrapper v2 parity (ruling R11): the CLI inherits our environment,
+        // and only PATH is replaced, by the policy's path_env.
         let fx = Fx::new();
         let cli = fx.script("env\n");
         let (_, stdout, _, _) = exited(
@@ -676,16 +636,15 @@ mod tests {
             .await,
         );
         let lines: Vec<&str> = stdout.lines().collect();
-        assert!(lines.contains(&&*format!("PATH={PATH_ENV}")), "{stdout}");
-        // cargo test always sets CARGO_* in our environment: none may leak.
-        assert!(std::env::var_os("CARGO_MANIFEST_DIR").is_some());
-        assert!(!lines.iter().any(|l| l.starts_with("CARGO")), "{stdout}");
-        if let Some(home) = std::env::var_os("HOME") {
-            assert!(
-                lines.contains(&&*format!("HOME={}", home.to_string_lossy())),
-                "{stdout}"
-            );
-        }
+        let paths: Vec<&&str> = lines.iter().filter(|l| l.starts_with("PATH=")).collect();
+        assert_eq!(paths, [&&*format!("PATH={PATH_ENV}")], "{stdout}");
+        // cargo test sets CARGO_MANIFEST_DIR in our environment: an unrelated
+        // variable that must reach the CLI unchanged.
+        let inherited = std::env::var("CARGO_MANIFEST_DIR").expect("set by cargo test");
+        assert!(
+            lines.contains(&&*format!("CARGO_MANIFEST_DIR={inherited}")),
+            "{stdout}"
+        );
     }
 
     #[tokio::test]
