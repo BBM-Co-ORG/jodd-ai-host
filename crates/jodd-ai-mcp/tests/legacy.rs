@@ -880,6 +880,33 @@ fn forget_logs_one_metadata_line() {
 }
 
 #[test]
+fn forget_without_a_keys_file_exits_70_like_wrapper_v2() {
+    // Ruling R24. wrapper v2: `grep -a -v " jodd-ai-$key$" "$k" > "$n"`
+    // exits 2 on a missing file (with grep's own message), and `[ "$s" -le 1 ]
+    // || exit 70` follows. Missing ~/.ssh ends the same way.
+    let fx = Fx::new(false);
+    let want = format!(
+        "grep: {}/.ssh/authorized_keys: No such file or directory\n",
+        fx.path("home").display()
+    );
+    let (code, out, err) = forced(&fx, Some("3f2a9b1c"), "jodd-ai-run 2 forget", b"");
+    assert_eq!((code, out.as_str(), err.as_str()), (70, "", want.as_str()));
+    std::fs::create_dir(fx.path("home/.ssh")).unwrap();
+    let (code, out, err) = forced(&fx, Some("3f2a9b1c"), "jodd-ai-run 2 forget", b"");
+    assert_eq!((code, out.as_str(), err.as_str()), (70, "", want.as_str()));
+    assert!(
+        !fx.path("home/.ssh/authorized_keys").exists(),
+        "nothing created"
+    );
+    let log = std::fs::read_to_string(fx.path("calls.log")).unwrap();
+    assert_eq!(log.lines().count(), 2, "{log}");
+    assert!(
+        log.lines().all(|l| l.ends_with(" outcome=no_file")),
+        "{log}"
+    );
+}
+
+#[test]
 fn forget_needs_an_eight_hex_key_id() {
     let fx = Fx::new(false);
     for key in [
@@ -898,6 +925,8 @@ fn forget_needs_an_eight_hex_key_id() {
         );
     }
     // Any version: forget, like status, is answered before the version check.
+    std::fs::create_dir(fx.path("home/.ssh")).unwrap();
+    std::fs::write(fx.path("home/.ssh/authorized_keys"), "").unwrap();
     for original in ["jodd-ai-run 2 forget", "jodd-ai-run 9 forget"] {
         let (code, out, err) = forced(&fx, Some("3f2a9b1c"), original, b"");
         assert_eq!(
@@ -983,6 +1012,8 @@ fn status_and_forget_make_no_slot_dir() {
     let fx = Fx::new(false);
     let slots = fx.path("slots/not-yet");
     let env = [("JODD_AI_MCP_SLOTS_DIR", &*s(&slots))];
+    std::fs::create_dir(fx.path("home/.ssh")).unwrap();
+    std::fs::write(fx.path("home/.ssh/authorized_keys"), "").unwrap();
     let (code, _, err) = run(&fx, &req("status", ""), &env, b"");
     assert_eq!(code, 0, "{err}");
     let (code, _, err) = run(

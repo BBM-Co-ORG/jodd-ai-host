@@ -47,9 +47,26 @@ impl KeyLine {
     }
 }
 
+/// What `forget_detail` found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Forgot {
+    Removed,
+    /// The file has no line for the id.
+    NotFound,
+    /// There is no keys file (or no `~/.ssh`); carries the file's path.
+    NoFile(PathBuf),
+}
+
 /// Remove every `jodd-ai-<key_id>` line; `Ok(true)` when one was removed.
+/// A missing keys file is `Ok(false)`: there is nothing to revoke.
 pub fn forget(key_id: &str) -> io::Result<bool> {
-    forget_in(&home()?, euid(), key_id)
+    forget_detail(key_id).map(|f| f == Forgot::Removed)
+}
+
+/// `forget`, telling a missing file apart (the legacy shim must: wrapper v2
+/// exits 70 there, because its `grep` cannot read the file).
+pub fn forget_detail(key_id: &str) -> io::Result<Forgot> {
+    forget_detail_in(&home()?, euid(), key_id)
 }
 
 /// Every `jodd-ai-<id>` key line, in file order. Comment lines are skipped.
@@ -206,7 +223,12 @@ fn trailing_id(text: &[u8]) -> Option<&str> {
     (is_key_id(id) && before.ends_with(MARK)).then(|| std::str::from_utf8(id).unwrap_or_default())
 }
 
+#[cfg(test)]
 fn forget_in(home: &Path, uid: u32, key_id: &str) -> io::Result<bool> {
+    forget_detail_in(home, uid, key_id).map(|f| f == Forgot::Removed)
+}
+
+fn forget_detail_in(home: &Path, uid: u32, key_id: &str) -> io::Result<Forgot> {
     if !is_key_id(key_id.as_bytes()) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -214,7 +236,7 @@ fn forget_in(home: &Path, uid: u32, key_id: &str) -> io::Result<bool> {
         ));
     }
     let Some(file) = read_keys(home, uid)? else {
-        return Ok(false);
+        return Ok(Forgot::NoFile(home.join(".ssh/authorized_keys")));
     };
     let mut kept = Vec::with_capacity(file.bytes.len());
     let mut removed = false;
@@ -225,10 +247,11 @@ fn forget_in(home: &Path, uid: u32, key_id: &str) -> io::Result<bool> {
             kept.extend_from_slice(line);
         }
     }
-    if removed {
-        file.replace(&kept)?;
+    if !removed {
+        return Ok(Forgot::NotFound);
     }
-    Ok(removed)
+    file.replace(&kept)?;
+    Ok(Forgot::Removed)
 }
 
 fn scan_in(home: &Path, uid: u32) -> io::Result<Vec<KeyLine>> {
@@ -240,8 +263,7 @@ fn scan_in(home: &Path, uid: u32) -> io::Result<Vec<KeyLine>> {
             let text = split_end(line).0;
             let id = trailing_id(text)?;
             let text = std::str::from_utf8(text).ok()?;
-            let parsed = parse(text)?;
-            let command = parsed.command();
+            let command = parse(text)?.command;
             Some(KeyLine {
                 id: id.to_string(),
                 points_at_mcp: command.as_deref().is_some_and(is_mcp_command),
@@ -284,23 +306,46 @@ fn adopt_in(home: &Path, uid: u32, mcp_path: &str) -> io::Result<usize> {
     Ok(count)
 }
 
-/// The re-pointed line for a legacy jodd line, else `None`. Options other
-/// than `restrict` and `command` (an administrator's `from="…"`) are kept.
+/// The re-pointed line for a legacy jodd line, else `None`.
+///
+/// Never widens what the old line allowed (ruling R22): the new line is
+/// `restrict,command="<mcp> --key <id>"` followed only by the old line's
+/// NARROWING options (`from=`, `expiry-time=`, `verify-required`, `no-*`
+/// except `no-touch-required`). A line with any other option (`pty`,
+/// `port-forwarding`, `permitopen=`, `environment=`, …) is left as it is:
+/// placed after `restrict` such an option would re-enable what `restrict`
+/// turns off. `scan` still reports it as `legacy`.
 fn adopted(text: &[u8], mcp_path: &str) -> Option<String> {
     let id = trailing_id(text)?;
     let text = std::str::from_utf8(text).ok()?;
     let p = parse(text)?;
-    if p.comment != format!("jodd-ai-{id}") || !is_legacy_command(&p.command()?) {
+    if p.comment != format!("jodd-ai-{id}") || !is_legacy_command(p.command.as_deref()?) {
         return None;
     }
     let mut opts = format!("restrict,command=\"{mcp_path} --key {id}\"");
-    for o in p.options() {
-        if !(o.eq_ignore_ascii_case("restrict") || is_command_option(o)) {
-            opts.push(',');
-            opts.push_str(o);
+    for o in split_options(p.options) {
+        if o.eq_ignore_ascii_case("restrict") || is_command_option(o) {
+            continue;
         }
+        if !is_narrowing(o) {
+            return None;
+        }
+        opts.push(',');
+        opts.push_str(o);
     }
     Some(format!("{opts} {} {} jodd-ai-{id}", p.key_type, p.key_body))
+}
+
+/// An option that only ever takes rights away.
+fn is_narrowing(o: &str) -> bool {
+    let has = |prefix: &str| {
+        o.get(..prefix.len())
+            .is_some_and(|p| p.eq_ignore_ascii_case(prefix))
+    };
+    has("from=\"")
+        || has("expiry-time=\"")
+        || o.eq_ignore_ascii_case("verify-required")
+        || (has("no-") && !o.eq_ignore_ascii_case("no-touch-required"))
 }
 
 /// `…/.jodd/ai-run-v<digits>` as the command's program.
@@ -330,6 +375,8 @@ struct Parsed<'a> {
     key_type: &'a str,
     key_body: &'a str,
     comment: &'a str,
+    /// The one `command="…"` value, dequoted.
+    command: Option<String>,
 }
 
 /// Key types sshd reads; a first word that is none of these is options.
@@ -337,6 +384,8 @@ fn is_key_type(w: &str) -> bool {
     w.starts_with("ssh-") || w.starts_with("ecdsa-") || w.starts_with("sk-")
 }
 
+/// `None` for a line sshd would not use as a key: a comment or blank, an
+/// unterminated quote, a malformed `command="…"`, or more than one of them.
 fn parse(text: &str) -> Option<Parsed<'_>> {
     let t = text.trim_start_matches([' ', '\t']);
     if t.is_empty() || t.starts_with('#') {
@@ -359,11 +408,19 @@ fn parse(text: &str) -> Option<Parsed<'_>> {
         return None;
     }
     let comment = rest[key_body.len()..].trim_matches([' ', '\t']);
+    let mut commands = split_options(options).filter(|o| is_command_option(o));
+    let command = match (commands.next(), commands.next()) {
+        (None, _) => None,
+        // sshd: "multiple "command" clauses" rejects the key.
+        (Some(_), Some(_)) => return None,
+        (Some(o), None) => Some(dequote(&o[9..])?),
+    };
     Some(Parsed {
         options,
         key_type,
         key_body,
         comment,
+        command,
     })
 }
 
@@ -371,55 +428,76 @@ fn first_word(t: &str) -> &str {
     t.split([' ', '\t']).next().unwrap_or("")
 }
 
-/// Where the options field ends: the first blank outside double quotes
-/// (`\"` inside quotes is a literal quote). `None` for an unterminated quote.
+/// sshd's `sshkey_advance_past_options`: the options field ends at the first
+/// blank outside double quotes; `\"` is skipped as a pair both inside and
+/// outside quotes, and no other backslash means anything. `None` for an
+/// unterminated quote.
 fn options_end(t: &str) -> Option<usize> {
-    let mut quoted = false;
-    let mut escaped = false;
-    for (i, c) in t.char_indices() {
-        if escaped {
-            escaped = false;
-        } else if quoted && c == '\\' {
-            escaped = true;
-        } else if c == '"' {
-            quoted = !quoted;
-        } else if !quoted && (c == ' ' || c == '\t') {
-            return Some(i);
+    let b = t.as_bytes();
+    let (mut i, mut quoted) = (0, false);
+    while i < b.len() {
+        match b[i] {
+            b'\\' if b.get(i + 1) == Some(&b'"') => i += 1,
+            b'"' => quoted = !quoted,
+            b' ' | b'\t' if !quoted => return Some(i),
+            _ => {}
         }
+        i += 1;
     }
-    (!quoted).then_some(t.len())
+    (!quoted).then_some(b.len())
 }
 
-impl<'a> Parsed<'a> {
-    /// The options, split on commas outside quotes.
-    fn options(&self) -> Vec<&'a str> {
-        if self.options.is_empty() {
-            return Vec::new();
+/// The options, split on commas outside quotes (the same quote rule).
+fn split_options(field: &str) -> impl Iterator<Item = &str> {
+    let b = field.as_bytes();
+    let mut cuts = Vec::new();
+    let (mut i, mut quoted) = (0, false);
+    while i < b.len() {
+        match b[i] {
+            b'\\' if b.get(i + 1) == Some(&b'"') => i += 1,
+            b'"' => quoted = !quoted,
+            b',' if !quoted => cuts.push(i),
+            _ => {}
         }
-        let mut out = Vec::new();
-        let (mut start, mut quoted, mut escaped) = (0, false, false);
-        for (i, c) in self.options.char_indices() {
-            if escaped {
-                escaped = false;
-            } else if quoted && c == '\\' {
-                escaped = true;
-            } else if c == '"' {
-                quoted = !quoted;
-            } else if !quoted && c == ',' {
-                out.push(&self.options[start..i]);
-                start = i + 1;
+        i += 1;
+    }
+    let mut start = 0;
+    let mut parts: Vec<&str> = Vec::new();
+    if !field.is_empty() {
+        for c in cuts {
+            parts.push(&field[start..c]);
+            start = c + 1;
+        }
+        parts.push(&field[start..]);
+    }
+    parts.into_iter()
+}
+
+/// sshd's `opt_dequote` on what follows `command="`: up to the closing
+/// quote, `\"` read as `"`, and nothing may follow that quote within the
+/// option. `None` otherwise.
+fn dequote(s: &str) -> Option<String> {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'\\' if b.get(i + 1) == Some(&b'"') => {
+                out.push(b'"');
+                i += 2;
+            }
+            b'"' => {
+                return (i + 1 == b.len())
+                    .then(|| String::from_utf8(out).ok())
+                    .flatten();
+            }
+            c => {
+                out.push(c);
+                i += 1;
             }
         }
-        out.push(&self.options[start..]);
-        out
     }
-
-    /// The `command="…"` value with `\"` unescaped, as sshd reads it.
-    fn command(&self) -> Option<String> {
-        let o = self.options().into_iter().find(|o| is_command_option(o))?;
-        let inner = o[9..].strip_suffix('"')?;
-        Some(inner.replace("\\\"", "\""))
-    }
+    None
 }
 
 #[cfg(test)]
@@ -535,6 +613,28 @@ mod tests {
     }
 
     #[test]
+    fn forget_detail_tells_a_missing_file_apart() {
+        let h = Home::new();
+        let want = Forgot::NoFile(h.path().join(".ssh/authorized_keys"));
+        assert_eq!(forget_detail_in(h.path(), uid(), "3f2a9b1c").unwrap(), want);
+        let bare = tempfile::tempdir().unwrap();
+        assert_eq!(
+            forget_detail_in(bare.path(), uid(), "3f2a9b1c").unwrap(),
+            Forgot::NoFile(bare.path().join(".ssh/authorized_keys"))
+        );
+        h.write(format!("{OTHER}\n").as_bytes());
+        assert_eq!(
+            forget_detail_in(h.path(), uid(), "3f2a9b1c").unwrap(),
+            Forgot::NotFound
+        );
+        h.write(mcp_line("3f2a9b1c").as_bytes());
+        assert_eq!(
+            forget_detail_in(h.path(), uid(), "3f2a9b1c").unwrap(),
+            Forgot::Removed
+        );
+    }
+
+    #[test]
     fn forget_refuses_a_malformed_id() {
         let h = Home::new();
         h.write(format!("{OTHER} jodd-ai-\n").as_bytes());
@@ -595,13 +695,14 @@ mod tests {
     }
 
     #[test]
-    fn adopt_keeps_extra_options_and_the_line_ending() {
+    fn adopt_keeps_narrowing_options() {
+        // Narrowing options survive, after the new command; the line ending too.
         let h = Home::new();
         let p = h.path().display().to_string();
         h.write(
             format!(
-                "from=\"10.0.0.0/8,192.168.1.1\",command=\"{p}/.jodd/ai-run-v12 --key abcdef01\",no-pty  \
-                 ssh-rsa AAAAB3rsa   jodd-ai-abcdef01\r\nlast"
+                "from=\"10.0.0.0/8,192.168.1.1\",command=\"{p}/.jodd/ai-run-v12 --key abcdef01\",no-pty,\
+                 EXPIRY-TIME=\"20990101\",verify-required  ssh-rsa AAAAB3rsa   jodd-ai-abcdef01\r\nlast"
             )
             .as_bytes(),
         );
@@ -609,9 +710,108 @@ mod tests {
         assert_eq!(
             s(&h.read()),
             format!(
-                "restrict,command=\"{MCP} --key abcdef01\",from=\"10.0.0.0/8,192.168.1.1\",no-pty \
-                 ssh-rsa AAAAB3rsa jodd-ai-abcdef01\r\nlast"
+                "restrict,command=\"{MCP} --key abcdef01\",from=\"10.0.0.0/8,192.168.1.1\",no-pty,\
+                 EXPIRY-TIME=\"20990101\",verify-required ssh-rsa AAAAB3rsa jodd-ai-abcdef01\r\nlast"
             )
+        );
+    }
+
+    #[test]
+    fn adopt_never_widens_restrict() {
+        // Ruling R22: `pty` after `restrict` would re-enable a PTY, and a line
+        // that forwarded ports must not keep doing so through jodd-ai-mcp.
+        // Any option that is not narrowing leaves the line as it is.
+        let h = Home::new();
+        let p = h.path().display().to_string();
+        let cmd = |id: &str| format!("command=\"{p}/.jodd/ai-run-v2 --key {id}\"");
+        let lines = [
+            format!(
+                "pty,restrict,{} ssh-ed25519 AAAAx jodd-ai-11111111",
+                cmd("11111111")
+            ),
+            format!(
+                "port-forwarding,{} ssh-ed25519 AAAAx jodd-ai-22222222",
+                cmd("22222222")
+            ),
+            format!(
+                "restrict,{},agent-forwarding ssh-ed25519 AAAAx jodd-ai-33333333",
+                cmd("33333333")
+            ),
+            format!(
+                "restrict,{},permitopen=\"localhost:22\" ssh-ed25519 AAAAx jodd-ai-44444444",
+                cmd("44444444")
+            ),
+            format!(
+                "restrict,{},environment=\"A=b\" ssh-ed25519 AAAAx jodd-ai-55555555",
+                cmd("55555555")
+            ),
+            format!(
+                "restrict,{},no-touch-required sk-ssh-ed25519@openssh.com AAAAx jodd-ai-66666666",
+                cmd("66666666")
+            ),
+            format!(
+                "restrict,{},X11-forwarding,user-rc ssh-ed25519 AAAAx jodd-ai-77777777",
+                cmd("77777777")
+            ),
+        ];
+        let before = lines.join("\n") + "\n";
+        h.write(before.as_bytes());
+        assert_eq!(adopt_in(h.path(), uid(), MCP).unwrap(), 0);
+        assert_eq!(s(&h.read()), before);
+        let kinds: Vec<_> = scan_in(h.path(), uid())
+            .unwrap()
+            .iter()
+            .map(KeyLine::kind)
+            .collect();
+        assert_eq!(kinds, ["legacy"; 7], "doctor keeps flagging them");
+    }
+
+    #[test]
+    fn options_follow_sshds_quote_rule() {
+        // sshkey_advance_past_options: `\"` is skipped as a pair inside AND
+        // outside quotes; no other backslash escapes anything.
+        assert_eq!(options_end(r#"a\"b c"#), Some(4));
+        assert_eq!(options_end(r#"x="a b" c"#), Some(7));
+        assert_eq!(options_end(r#"x="a\" b" c"#), Some(9));
+        // `\\"`: the first backslash is literal, `\"` is the pair: unterminated.
+        assert_eq!(options_end(r#"x="a\\" b"#), None);
+        assert_eq!(options_end(r#"x="a b"#), None);
+        assert_eq!(
+            split_options(r#"from="a,b",no-pty,x=\"y,z"#).collect::<Vec<_>>(),
+            [r#"from="a,b""#, "no-pty", r#"x=\"y"#, "z"]
+        );
+        assert_eq!(dequote(r#"/a b\"c""#).as_deref(), Some(r#"/a b"c"#));
+        assert_eq!(dequote(r#"/a\b""#).as_deref(), Some(r#"/a\b"#));
+        assert_eq!(dequote(r#"/a"b"#), None, "text after the closing quote");
+        assert_eq!(dequote("/a"), None, "no closing quote");
+    }
+
+    #[test]
+    fn adopt_skips_lines_sshd_would_reject() {
+        let h = Home::new();
+        let p = h.path().display().to_string();
+        let lines = [
+            // more than one command= (sshd: multiple "command" clauses)
+            format!(
+                "restrict,command=\"{p}/.jodd/ai-run-v2 --key 11111111\",command=\"/bin/sh\" \
+                 ssh-ed25519 AAAAx jodd-ai-11111111"
+            ),
+            // `\\"` inside quotes: the quote never closes in sshd's reading
+            format!(
+                "restrict,command=\"{p}/.jodd/ai-run-v2 --key 22222222\\\\\" ssh-ed25519 AAAAx jodd-ai-22222222"
+            ),
+            // text after the command's closing quote
+            format!(
+                "restrict,command=\"{p}/.jodd/ai-run-v2 --key 33333333\"x ssh-ed25519 AAAAx jodd-ai-33333333"
+            ),
+        ];
+        let before = lines.join("\n");
+        h.write(before.as_bytes());
+        assert_eq!(adopt_in(h.path(), uid(), MCP).unwrap(), 0);
+        assert_eq!(s(&h.read()), before);
+        assert!(
+            scan_in(h.path(), uid()).unwrap().is_empty(),
+            "not active keys"
         );
     }
 

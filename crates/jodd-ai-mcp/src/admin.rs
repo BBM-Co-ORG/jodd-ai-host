@@ -76,10 +76,16 @@ pub fn run(args: &[&str], policy_path: &Path) -> i32 {
         }
         [cmd @ ("adopt-keys" | "scan-keys")] => {
             if uid() == 0 {
+                // Root never touches the account's home; the helper runs these
+                // as the account. scan-keys is read-only: `status` shows it.
+                let next = if *cmd == "adopt-keys" {
+                    "sudo jodd-ai-host adopt-keys"
+                } else {
+                    "jodd-ai-host status"
+                };
                 eprintln!(
-                    "admin {cmd} edits the AI account's own ~/.ssh and must not run as root. \
-                     Run it through the helper, which runs it as the account: \
-                     sudo jodd-ai-host adopt-keys"
+                    "admin {cmd} works on the AI account's own ~/.ssh and must not run as root. \
+                     Run it through the helper, which runs it as the account: {next}"
                 );
                 return FAILED;
             }

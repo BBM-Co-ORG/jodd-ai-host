@@ -15,6 +15,7 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWrite
 use tokio_util::sync::CancellationToken;
 
 use crate::harness::{self, Answer};
+use crate::keys::Forgot;
 use crate::policy::{HarnessId, Policy};
 use crate::run::{self, RunOutcome, RunRequest};
 use crate::slots::Slots;
@@ -119,15 +120,21 @@ async fn status(policy: &Policy, stdout: &mut (impl AsyncWrite + Unpin)) -> i32 
 }
 
 /// `case $key in [0-9a-f]{8}) ;; *) echo "no key id" >&2; exit 64 ;; esac`;
-/// any failure editing the keys file is a bare `exit 70`.
+/// any failure editing the keys file is a bare `exit 70`. A missing keys
+/// file is a failure too (ruling R24): wrapper v2's `grep` exits 2 on it,
+/// printing GNU grep's message, and the wrapper then exits 70.
 /// Returns the exit code and the outcome the call log records.
 async fn forget(key: Option<&str>, stderr: &mut (impl AsyncWrite + Unpin)) -> (i32, &'static str) {
     let Some(key) = key.filter(|k| is_key_id(k)) else {
         return (refuse(stderr, "no key id\n", EX_USAGE).await, "no_key");
     };
-    match crate::keys::forget(key) {
-        Ok(true) => (0, "removed"),
-        Ok(false) => (0, "not_found"),
+    match crate::keys::forget_detail(key) {
+        Ok(Forgot::Removed) => (0, "removed"),
+        Ok(Forgot::NotFound) => (0, "not_found"),
+        Ok(Forgot::NoFile(path)) => {
+            let msg = format!("grep: {}: No such file or directory\n", path.display());
+            (refuse(stderr, &msg, EX_SOFTWARE).await, "no_file")
+        }
         Err(_) => (EX_SOFTWARE, "error"),
     }
 }

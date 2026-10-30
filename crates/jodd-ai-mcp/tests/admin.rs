@@ -495,11 +495,18 @@ fn adopt_keys_refused_as_root() {
     let fx = Fx::new();
     let before = format!("{OTHER}\n{}\n", fx.legacy("11111111"));
     fx.write_keys(&before);
-    for cmd in ["adopt-keys", "scan-keys"] {
+    // Each names the helper command that does the job as the account;
+    // scan-keys is read-only, so that is `status`.
+    for (cmd, next) in [
+        ("adopt-keys", "jodd-ai-host adopt-keys"),
+        ("scan-keys", "jodd-ai-host status"),
+    ] {
         let (code, out, err) = fx.admin(ROOT, &[cmd]);
         assert_eq!((code, out.as_str()), (1, ""), "{cmd}");
-        assert!(err.contains("jodd-ai-host adopt-keys"), "{cmd}: {err}");
+        assert!(err.contains(next), "{cmd}: {err}");
     }
+    let (_, _, err) = fx.admin(ROOT, &["scan-keys"]);
+    assert!(!err.contains("adopt-keys"), "{err}");
     assert_eq!(fs::read_to_string(fx.keys()).unwrap(), before);
 }
 
