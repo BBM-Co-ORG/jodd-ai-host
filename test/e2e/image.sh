@@ -153,9 +153,10 @@ tx 'jodd-ai-host list' | grep -qx 'codex  enabled  /usr/local/bin/codex' || tfai
 # a terminal is refused (restrict = no-pty; a client that asked for one with -t then gives up)
 rc=0; E2E_SSH_EXTRA=-tt "$E2E_KD/ssh-$K1" 'jodd-ai-run 2 status' </dev/null > "$out" 2> "$err" || rc=$?
 grep -q 'PTY allocation request failed' "$err" || tfail "-tt: no pty refusal (rc $rc, stderr '$(cat "$err")')"
-# no forwarding (restrict = no-port-forwarding): ssh -W gets "administratively prohibited"
+# no forwarding (restrict = no-port-forwarding): sshd refuses ssh -W, and says so in its log
 rc=0; E2E_SSH_EXTRA='-W 127.0.0.1:22' "$E2E_KD/ssh-$K1" </dev/null > "$out" 2> "$err" || rc=$?
-[ "$rc" != 0 ] && grep -qi 'prohibited' "$err" || tfail "-W: rc $rc, stderr '$(cat "$err")'"
+[ "$rc" = 255 ] && grep -q 'stdio forwarding failed' "$err" || tfail "-W: rc $rc, stderr '$(cat "$err")'"
+docker logs "$tname" 2>&1 | grep -q 'refused local port forward' || tfail "-W: sshd did not log the refused forward"
 echo "ok: every other command gets 64, no terminal, no forwarding"
 
 # ---------------------------------------------------------------------------------------------
