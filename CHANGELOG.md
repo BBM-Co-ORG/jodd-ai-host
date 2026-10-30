@@ -5,7 +5,7 @@ All notable changes to jodd-ai-host are recorded here. Versions follow
 
 ## [Unreleased]
 
-## [1.0.0]
+## [1.0.0] - 2026-10-31
 
 The first release of the AI host as its own project. Jodd's keys now run a
 program the host owns, under a policy only the administrator can change.
