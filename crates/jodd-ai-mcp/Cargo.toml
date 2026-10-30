@@ -7,3 +7,6 @@ license = "Apache-2.0"
 repository = "https://github.com/BBM-Co-ORG/jodd-ai-host"
 
 [dependencies]
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+tempfile = "3"
