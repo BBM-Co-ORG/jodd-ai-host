@@ -5,12 +5,22 @@ name: Release
 # What gets PUBLISHED is decided once, by the `meta` job's `publish` output, and every push /
 # upload / release step is conditioned on it:
 #   - push of a v* tag            publish (the tag must be v<the crate's version>)
+#   - push of a branch            a DRY RUN (only when it changes the release pipeline itself)
 #   - workflow_dispatch           a DRY RUN, unless dry_run is false AND the run is on a v* tag
 #                                 (a re-run of that release); dry_run=false on a branch fails
 # A dry run builds everything (artifacts: the eight release files) and publishes nothing.
 on:
   push:
     tags: ['v*']
+    # (paths apply to branch pushes only; GitHub never filters a tag push by path)
+    branches: ['**']
+    paths:
+      - .github/workflows/release.yml
+      - .github/actions/**
+      - docker/**
+      - test/docker/**
+      - test/test_image_smoke.sh
+      - lib/mcp.sh
   workflow_dispatch:
     inputs:
       dry_run:
@@ -53,7 +63,7 @@ jobs:
           echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.+-]+)?$' \
             || { echo "::error::crates/jodd-ai-mcp/Cargo.toml has no usable version ('$version')"; exit 1; }
           case $EVENT in
-            push) publish=true ;;                      # only v* tags trigger a push run
+            push) case $REF in refs/tags/v*) publish=true ;; *) publish=false ;; esac ;;
             workflow_dispatch) [ "$DRY_RUN" = false ] && publish=true || publish=false ;;
             *) publish=false ;;
           esac
