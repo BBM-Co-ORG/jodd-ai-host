@@ -56,6 +56,10 @@ program the host owns, under a policy only the administrator can change.
 ### Known gap
 
 - `~/.ssh/authorized_keys` still belongs to the AI account, so a program that
-  could write as that account could loosen a key line. Nothing Jodd runs can
-  write there today (Claude Code runs with its tools off, Codex in its
-  read-only sandbox). See [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md).
+  could write as that account could loosen a key line. The account's shell
+  start-up files (for example `~/.bashrc`, which Debian's bash reads for the
+  commands sshd runs) are in the same class: writing one runs code at the next
+  connection. Both need writing as the account, which nothing Jodd runs can do
+  today (Claude Code runs with its tools off, Codex in its read-only sandbox).
+  Keep both CLIs without write access; the key file moves to root before any
+  write-capable harness is allowed. See [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md).

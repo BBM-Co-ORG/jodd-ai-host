@@ -82,11 +82,59 @@ sudo jodd-ai-host enable codex
   the change at its next call.
 - The file is `/etc/jodd-ai-host/policy.toml`. In Docker it lives in the
   `state` volume (`/var/lib/jodd-ai-host/policy.toml`), with a link from
-  `/etc`, so an image update keeps it. Edit it with the commands above, not by
-  hand: `jodd-ai-host doctor` says what is wrong with a hand-edited one.
+  `/etc`, so an image update keeps it. Turn CLIs on and off with the commands
+  above. The limits have no command: edit them by hand (below).
 
 A client cannot change any of this. It can ask for less (a shorter time
 limit), never for more.
+
+### The policy file
+
+A policy with both CLIs enabled and every field written out:
+
+```toml
+max_request_bytes = 8388608
+max_concurrent_runs = 2
+
+[harness.claude]
+enabled = true
+path = "/home/jodd-ai/.local/bin/claude"
+path_env = "/home/jodd-ai/.local/bin:/usr/local/bin:/usr/bin:/bin"
+timeout_secs = 120
+
+[harness.codex]
+enabled = true
+path = "/home/jodd-ai/.local/bin/codex"
+path_env = "/home/jodd-ai/.local/bin:/usr/local/bin:/usr/bin:/bin"
+timeout_secs = 180
+```
+
+| Field | Means | Default |
+|---|---|---|
+| `max_request_bytes` | The largest request: prompt, system text and schema together. A larger one is refused before the CLI starts. | `8388608` (8 MiB) |
+| `max_concurrent_runs` | Runs at once, across every connection. One more is refused at once, never queued. | `2` |
+| `[harness.claude]`, `[harness.codex]` | One table per CLI. A CLI with no table is undecided: it does not run, and `auto-enable` may enable it. | none |
+| `enabled` | `true` lets Jodd run this CLI. `false` is a decision that `auto-enable` keeps. | required |
+| `path` | The CLI's program, an absolute path. A relative path counts as not enabled. | required |
+| `path_env` | The `PATH` the CLI runs with. | required |
+| `timeout_secs` | Seconds before a run is stopped. A client may ask for less, never more. Must be more than 0. | required (`enable` writes 120 for Claude Code, 180 for Codex) |
+
+The two limits at the top may be left out. Inside a `[harness.…]` table all four
+fields are required. **A file that does not parse is treated as empty: nothing
+is enabled**, and every request is refused (`not_enabled`, with a message
+that names `jodd-ai-host doctor`). So is a missing field, an unknown field, a value of the
+wrong type, and `timeout_secs = 0`. (`max_concurrent_runs = 0` parses, but
+refuses every request as busy.)
+
+To change a limit, edit the file as root (keep it root-owned, mode 0644), then
+check it:
+
+```sh
+sudo jodd-ai-host doctor
+```
+
+`doctor` says what is wrong with the file, if anything. A change applies to the
+next request, like `enable` and `disable`.
 
 ## What Setup does with your password
 
@@ -140,10 +188,16 @@ The line in `authorized_keys` starts with
 
 **One gap stays open in 1.0.** `~/.ssh/authorized_keys` belongs to the
 `jodd-ai` account, so a program that could write files as `jodd-ai` could
-remove `restrict,command=…` from a line and get a shell. Today nothing Jodd
-runs can write there: Claude Code runs with all its tools turned off, and Codex
-runs in its read-only sandbox. A later release will move the key file out of
-the account's reach.
+remove `restrict,command=…` from a line and get a shell. The account's shell
+start-up files are in the same class: sshd starts `jodd-ai-mcp` through the
+account's shell, and some shells read a start-up file even for that (Debian's
+bash reads `~/.bashrc` for a command sshd runs), so a program that could write
+`~/.bashrc` could run its own commands at the next connection.
+Both need the same thing, writing files as `jodd-ai`, and today nothing Jodd
+runs can: Claude Code runs with all its tools turned off, and Codex runs in its
+read-only sandbox. Keep it that way: do not give either CLI write access as
+this account. A later release will move the key file out of the account's
+reach, and will do so before any CLI is allowed to write.
 
 What the key cannot stop is what the CLI itself may do while it runs:
 
@@ -194,6 +248,36 @@ rest of the machine.
 it ended), never the prompt or the answer. What each CLI keeps in its own
 folders on the host (`~/.claude`, `~/.codex`) follows that CLI's own rules.
 Codex is asked not to save a session file.
+
+## Reading the call log
+
+Each line says which key, which tool, which CLI, how long in milliseconds and
+how it ended, for example
+`key=1a2b3c4d tool=infer harness=claude dur_ms=5321 outcome=ok`. Where it goes:
+
+- **Linux with syslog** (most installs):
+
+  ```sh
+  journalctl -t jodd-ai-mcp
+  ```
+
+  Without journald, look for `jodd-ai-mcp` in `/var/log/syslog` or
+  `/var/log/messages`.
+- **Docker, or Linux with no syslog:** `/var/log/jodd-ai-host/calls.log`,
+  readable by root:
+
+  ```sh
+  docker compose exec ai-host cat /var/log/jodd-ai-host/calls.log
+  ```
+
+  In Docker this file is not rotated, and it is inside the container, not a
+  volume: a restart keeps it, a recreate (`docker compose pull` and `up -d`)
+  starts a new one.
+- **macOS:**
+
+  ```sh
+  log show --info --last 1d --predicate 'process == "jodd-ai-mcp"'
+  ```
 
 ## Stopping a run
 
