@@ -1,0 +1,38 @@
+#!/bin/sh
+# Test double for `codex exec`, ported from Jodd's wrapper.rs FAKE_CODEX.
+# Honours --output-last-message / --output-schema like the real one, echoes the
+# prompt into the answer file, chats on stdout and stderr (which the runner must
+# keep apart), and can be told to hang.
+#   FAKE_STARTED=<file>  created first thing: its absence proves the CLI never started
+#   FAKE_SLEEP=<secs>    hang that long (in a child `sleep`) before answering
+#   FAKE_PIDFILE=<file>  where the hanging `sleep` records its pid
+#   FAKE_STUBBORN=all    the fake (and so its `sleep`) ignores TERM; =child: only the `sleep`
+#   FAKE_EXIT=<code>     exit with this code
+#   FAKE_BINARY_OUT=1    also print invalid UTF-8 on stdout and stderr
+[ -n "$FAKE_STARTED" ] && : > "$FAKE_STARTED"
+out=; schema=; prev=
+for a in "$@"; do
+  [ "$prev" = --output-last-message ] && out=$a
+  [ "$prev" = --output-schema ] && schema=$a
+  prev=$a
+done
+cat > "$out.prompt"
+[ "$FAKE_STUBBORN" = all ] && trap '' TERM
+if [ -n "$FAKE_SLEEP" ]; then
+  if [ "$FAKE_STUBBORN" = child ]; then sh -c 'trap "" TERM; exec sleep "$1"' sh "$FAKE_SLEEP" &
+  else sleep "$FAKE_SLEEP" &
+  fi
+  [ -n "$FAKE_PIDFILE" ] && echo $! > "$FAKE_PIDFILE"
+  wait $!
+fi
+echo "noise on stdout"
+echo "codex stderr line" >&2
+if [ "$FAKE_BINARY_OUT" = 1 ]; then
+  printf 'bin\377\376out\n'
+  printf 'bin\377err\n' >&2
+fi
+# shellcheck disable=SC2012 # counting entries, names do not matter
+{ printf 'PROMPT<'; cat "$out.prompt"; printf '>SCHEMA<'; [ -n "$schema" ] && cat "$schema"; printf '>FILES<%s>' "$(ls -A | wc -l | tr -d ' ')"; } > "$out"
+rm -f "$out.prompt"
+[ -n "$FAKE_EXIT" ] && exit "$FAKE_EXIT"
+exit 0

@@ -1,0 +1,5 @@
+#!/bin/sh
+# Test double for `claude -p --output-format json`, ported from Jodd's
+# wrapper.rs FAKE_CLAUDE: prints a JSON envelope on stdout.
+p=$(cat)
+printf '{"result":"%s","args":%s}' "$p" "$#"

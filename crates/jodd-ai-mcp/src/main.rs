@@ -4,6 +4,8 @@
 mod harness;
 #[allow(dead_code)]
 mod policy;
+#[allow(dead_code)]
+mod run;
 
 use std::process::ExitCode;
 
