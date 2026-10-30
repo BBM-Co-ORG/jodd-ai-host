@@ -54,4 +54,12 @@ docker restart "$name" >/dev/null
 wait_log 'jodd-ai-host ready' 3 90
 docker logs "$name" 2>&1 | grep -q 'took over 20 s' || fail "no timeout message for the hanging profile"
 docker exec "$name" sh -c 'pgrep -x sshd >/dev/null' || fail "sshd is not running after a hanging profile"
+# Root never reads the account's files either: a ~/.profile that is a FIFO (opening it blocks
+# until a writer comes) must not hang the entrypoint before sshd starts. The account's own check
+# of it is bounded and warns.
+docker exec "$name" su -s /bin/sh jodd-ai -c 'rm -f ~/.profile && mkfifo ~/.profile'
+docker restart "$name" >/dev/null
+wait_log 'jodd-ai-host ready' 4 120
+docker logs "$name" 2>&1 | grep -q 'could not add ~/.local/bin' || fail "no warning for the FIFO ~/.profile"
+docker exec "$name" sh -c 'pgrep -x sshd >/dev/null' || fail "sshd is not running after a FIFO ~/.profile"
 echo "image smoke: ok"
