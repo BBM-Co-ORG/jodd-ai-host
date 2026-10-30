@@ -31,7 +31,7 @@ mcp_target() {
 # The latest release's version, from where GitHub redirects /releases/latest (ruling R27: no API,
 # no token, no rate limit). Prints e.g. 1.0.0.
 mcp_latest_version() {
-  _u=$(curl --proto '=https' --tlsv1.2 -fsSLI -o /dev/null -w '%{url_effective}' "$MCP_REPO_URL/releases/latest") || {
+  _u=$(curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSLI -o /dev/null -w '%{url_effective}' "$MCP_REPO_URL/releases/latest") || {
     warn "cannot reach $MCP_REPO_URL/releases/latest to find the latest jodd-ai-mcp (no network?). Pin one with JODD_AI_MCP_VERSION=<version>."; return 1; }
   _v=${_u##*/}; _v=${_v#v}
   if ! mcp_version_ok "$_v"; then
@@ -54,33 +54,51 @@ mcp_sha256() {
 # mcp_install DEST GROUP: download the release for this machine, verify its SHA-256 BEFORE
 # unpacking, unpack into a fresh temp dir, check the binary runs, and only then put it at DEST
 # (owner root, group GROUP, mode 0755) with a rename. On any failure DEST is left as it was.
-# Re-running installs the release again: that is the upgrade.
+# Re-running installs the release again: that is the upgrade. A re-run that cannot reach the
+# release (no network) keeps a WORKING installed binary, with a warning, and succeeds (ruling R29);
+# only a fresh install needs the download. A bad checksum or archive always fails.
 mcp_install() {
   _dest=$1 _grp=$2
+  _have=
+  if [ -x "$_dest" ]; then
+    _have=$("$_dest" --version 2>/dev/null) || _have=
+    case $_have in "jodd-ai-mcp "*) ;; *) _have= ;; esac
+  fi
   _target=$(mcp_target) || return 1
   _ver=${JODD_AI_MCP_VERSION:-}
   if [ -n "${JODD_AI_MCP_BASE_URL:-}" ]; then
     [ -n "$_ver" ] || { warn "JODD_AI_MCP_BASE_URL needs JODD_AI_MCP_VERSION."; return 1; }
     _base=${JODD_AI_MCP_BASE_URL%/} _proto='=https,file'
   else
-    if [ -z "$_ver" ]; then _ver=$(mcp_latest_version) || return 1; fi
+    if [ -z "$_ver" ]; then _ver=$(mcp_latest_version) || { mcp_keep; return; }; fi
     _base=$MCP_REPO_URL/releases/download/v$_ver _proto='=https'
   fi
   _ver=${_ver#v}
   mcp_version_ok "$_ver" || { warn "'$_ver' is not a jodd-ai-mcp version (like 1.0.0)."; return 1; }
   _asset=jodd-ai-mcp-$_ver-$_target.tar.gz
   _w=$(mktemp -d) || { warn "cannot create a temp directory."; return 1; }
-  _r=1
-  if mcp_install_in "$_w"; then _r=0; fi
+  _r=0
+  mcp_install_in "$_w" || _r=$?
   rm -rf "$_w"
+  # 3 = the release could not be downloaded
+  if [ "$_r" = 3 ]; then mcp_keep; return; fi
   return $_r
+}
+# The download failed: keep the installed binary if it works, else fail.
+mcp_keep() {
+  if [ -n "$_have" ]; then
+    warn "WARNING: could not download jodd-ai-mcp; keeping the one installed ($_dest: $_have). Run this installer again with the network up to upgrade it."
+    return 0
+  fi
+  return 1
 }
 # The body of mcp_install, working in the fresh, private directory $1.
 mcp_install_in() {
   say "downloading jodd-ai-mcp $_ver for $_target"
-  if ! { curl --proto "$_proto" --tlsv1.2 -fsSL "$_base/$_asset" -o "$1/$_asset" \
-         && curl --proto "$_proto" --tlsv1.2 -fsSL "$_base/$_asset.sha256" -o "$1/$_asset.sha256"; }; then
-    warn "cannot download $_base/$_asset (or its .sha256); no network, or no such release? Nothing was installed."; return 1
+  # Redirects (GitHub's release downloads redirect to its CDN) may only go to https.
+  if ! { curl --proto "$_proto" --proto-redir '=https' --tlsv1.2 -fsSL "$_base/$_asset" -o "$1/$_asset" \
+         && curl --proto "$_proto" --proto-redir '=https' --tlsv1.2 -fsSL "$_base/$_asset.sha256" -o "$1/$_asset.sha256"; }; then
+    warn "cannot download $_base/$_asset (or its .sha256); no network, or no such release? Nothing was installed."; return 3
   fi
   # "<64 hex>  <asset name>" (a leading * marks sha256sum's binary mode).
   _want=$(awk 'NR == 1 { print tolower($1) }' "$1/$_asset.sha256")

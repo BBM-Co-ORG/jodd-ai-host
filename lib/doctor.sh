@@ -1,5 +1,6 @@
 # `jodd-ai-host doctor`: one ok/FIX line per check; returns 1 if any check needs fixing.
 # Sourced by jodd-ai-host, so it uses that script's helpers (as_user, sshd_bin, fingerprint...).
+# shellcheck disable=SC2154  # tmp_err (a scratch file) is the helper's, like its functions
 # Read-only. The checks that need root (sshd -t / -T) say so instead of failing when run without it.
 _d_bad=0
 _d_ok()   { echo "ok    $*"; }
@@ -10,7 +11,9 @@ _d_warn() { echo "WARN  $*"; }
 # shellcheck disable=SC2012  # one named file; only the owner and mode columns are read
 _d_uid()  { ls -lnL "$1" 2>/dev/null | awk 'NR == 1 { print $3 }'; }
 # shellcheck disable=SC2012
-_d_mode() { ls -lL "$1" 2>/dev/null | awk 'NR == 1 { print substr($1, 1, 10) }'; }
+_d_mode() { ls -ldL "$1" 2>/dev/null | awk 'NR == 1 { print substr($1, 1, 10) }'; }
+# _d_gow MODE: the mode string lets the group or everyone write.
+_d_gow() { case $1 in ?????w????|????????w?) return 0 ;; *) return 1 ;; esac; }
 
 doctor() {
   _d_bad=0
@@ -118,7 +121,8 @@ EOP
     esac
     _mu=$(_d_uid "$MCP") _mm=$(_d_mode "$MCP")
     if [ "$_mu" != 0 ]; then _d_fix "$MCP is owned by uid ${_mu:-?}, not root: whoever owns it decides what Jodd's keys run. Re-run the installer (it installs it root-owned)."
-    else case $_mm in ?????w????|????????w?) _d_fix "$MCP ($_mm) can be changed by others than root. Run: sudo chmod 755 $MCP" ;; *) _d_ok "$MCP is root-owned ($_mm)" ;; esac; fi
+    elif _d_gow "$_mm"; then _d_fix "$MCP ($_mm) can be changed by others than root. Run: sudo chmod 755 $MCP"
+    else _d_ok "$MCP is root-owned ($_mm)"; fi
   fi
 
   # 7. the policy: valid, readable by the account (the server reads it as the account), and not
@@ -140,14 +144,27 @@ EOP
         _d_fix "$(printf '%s' "$_pe" | tr '\n' ' ' | tr -s ' ')"
       fi
     fi
-    if run_as_account "[ -r $(sq "$POLICY") ]" </dev/null >/dev/null 2>&1; then _d_ok "$U can read the policy"
-    else _d_fix "$U cannot read $POLICY, so jodd-ai-mcp (which runs as $U) enables nothing. Run: sudo chmod 644 $_pr"; fi
-    if run_as_account "[ -w $(sq "$_pr") ] || [ -w $(sq "$(dirname "$_pr")") ]" </dev/null >/dev/null 2>&1; then
-      _d_fix "$U can change the policy ($_pr or its directory is writable by it), so the account decides what Jodd may run. Make both root's: sudo chown root $_pr $(dirname "$_pr"); sudo chmod 644 $_pr; sudo chmod 755 $(dirname "$_pr")"
-    else
-      _d_ok "$U cannot change the policy"
-    fi
+    # Asked AS THE ACCOUNT, and the answer must be an explicit token: a step that did not run
+    # (su or sudo refused, no terminal for a password) is "could not check", never "ok".
+    _pd=$(dirname "$_pr")
+    _ans=$(run_as_account "if [ -r $(sq "$POLICY") ]; then echo R; else echo NR; fi; if [ -w $(sq "$_pr") ] || [ -w $(sq "$_pd") ]; then echo W; else echo NW; fi" </dev/null 2>/dev/null) || _ans=
+    _ans=$(printf '%s\n' "$_ans" | tr '\n' ' ')
+    case $_ans in
+      'R NW '|'NR NW '|'R W '|'NR W ')
+        case $_ans in R*) _d_ok "$U can read the policy" ;; *) _d_fix "$U cannot read $POLICY, so jodd-ai-mcp (which runs as $U) enables nothing. Run: sudo chmod 644 $_pr" ;; esac
+        case $_ans in *' NW ') _d_ok "$U cannot change the policy" ;;
+          *) _d_fix "$U can change the policy ($_pr or $_pd is writable by it), so the account decides what Jodd may run. Make both root's: sudo chown root $_pr $_pd; sudo chmod 644 $_pr; sudo chmod 755 $_pd" ;; esac ;;
+      *) _d_fix "could not check as $U whether it can read or change the policy (running a command as $U failed). Run doctor with sudo: sudo jodd-ai-host doctor" ;;
+    esac
+    # ... and from root's side: owned by root, and no group or other write on the file, on the
+    # directory that holds it, or on /etc/jodd-ai-host (whatever group the account is in).
     if [ "$(_d_uid "$_pr")" != 0 ]; then _d_fix "$_pr is not owned by root. Run: sudo chown root $_pr"; fi
+    _ed=$(dirname "$POLICY")
+    for _f in "$_pr" "$_pd" "$_ed"; do
+      if [ "$_f" = "$_ed" ] && [ "$_ed" = "$_pd" ]; then continue; fi
+      _fm=$(_d_mode "$_f")
+      if _d_gow "$_fm"; then _d_fix "$_f ($_fm) can be changed by others than root. Run: sudo chmod go-w $_f"; fi
+    done
     if grep -Eq '^[[:space:]]*max_concurrent_runs[[:space:]]*=[[:space:]]*0[[:space:]]*(#.*)?$' "$_pr" 2>/dev/null; then
       _d_fix "the policy sets max_concurrent_runs = 0, so every call is refused as busy. Remove the line (default 2) or raise it."
     fi
@@ -155,7 +172,8 @@ EOP
 
   # 8. Jodd's keys: each should run jodd-ai-mcp. Read as the account (root never opens its file).
   if [ -x "$MCP" ]; then
-    if _ks=$(mcp_as_account scan-keys </dev/null 2>&1); then
+    # stdout only: what the binary says on stderr is never taken for a key line.
+    if _ks=$(mcp_as_account scan-keys </dev/null 2>"$tmp_err"); then
       _kn=0
       while read -r _id _kind _kc; do
         [ -n "$_id" ] || continue
@@ -170,7 +188,7 @@ $_ks
 EOK
       _d_ok "Jodd keys read as $U ($_kn found)"
     else
-      _d_fix "cannot read $U's keys: $_ks"
+      _d_fix "cannot read $U's keys: $(tr '\n' ' ' < "$tmp_err")"
     fi
   fi
 

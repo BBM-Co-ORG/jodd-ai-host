@@ -175,7 +175,7 @@ fetch() { # $1 path under the kit, $2 destination
   if [ -n "$local_kit" ]; then
     cp "$local_kit/$1" "$2" || die "cannot copy $local_kit/$1."
   else
-    curl --proto '=https' --tlsv1.2 -fsSL "$kit_url/$1" -o "$2" || die "cannot download $kit_url/$1 (no network?). Download the kit and run install/linux.sh from it."
+    curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL "$kit_url/$1" -o "$2" || die "cannot download $kit_url/$1 (no network?). Download the kit and run install/linux.sh from it."
   fi
   if [ ! -s "$2" ] || ! sh -n "$2"; then die "$1 from the kit is empty or not a shell script; nothing was installed."; fi
 }

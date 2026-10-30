@@ -49,6 +49,18 @@ check "AllowGroups with one of its groups is fine" "$(slp 'allowgroups sshusers\
 has "DenyGroups with one of its groups is a problem" "$(slp 'denygroups users\n')" '^DenyGroups names users'
 check "a [ pattern is compared literally" "$(slp 'allowusers jodd-a[i]\n' | grep -c '^AllowUsers')" "1"
 
+# The real jodd-ai-mcp (a debug build): the helper reads keys and the policy only through it.
+# JODD_AI_MCP_TEST_BIN names a binary to use; otherwise it is built here.
+if [ -n "${JODD_AI_MCP_TEST_BIN:-}" ]; then
+  MCPBIN=$JODD_AI_MCP_TEST_BIN
+else
+  (cd "$here" && cargo build --quiet --locked -p jodd-ai-mcp) || { echo "FAIL: cannot build jodd-ai-mcp (needs cargo; or set JODD_AI_MCP_TEST_BIN)"; exit 1; }
+  MCPBIN=${CARGO_TARGET_DIR:-$here/target}/debug/jodd-ai-mcp
+fi
+case $MCPBIN in /*) ;; *) MCPBIN=$(pwd)/$MCPBIN ;; esac
+# Every helper run below uses it unless a test says otherwise.
+export JODD_AI_MCP_BIN="$MCPBIN"
+
 # A fake host the helper can manage.
 mkdir -p "$t/home/.ssh" "$t/etc"
 cat > "$t/conf" <<CONF
@@ -314,17 +326,9 @@ hasnt "root's environment does not reach su" "$(cat "$t/su.env")" '^E2E_ROOT_SEC
 has "su gets the account's HOME" "$(cat "$t/su.env")" "^HOME=$t/home4\$"
 has "su gets a plain PATH" "$(cat "$t/su.env")" '^PATH=/usr/bin:/bin$'
 
-# ---- jodd-ai-mcp. enable / disable / list / auto-enable / adopt-keys / status / doctor drive the
-# real binary: a debug build, which honours the test seams JODD_AI_MCP_POLICY (the policy file)
-# and JODD_AI_MCP_FAKE_UID (0 = "root", for the root-only policy edits). JODD_AI_MCP_TEST_BIN
-# names a binary to use; otherwise it is built here.
-if [ -n "${JODD_AI_MCP_TEST_BIN:-}" ]; then
-  MCPBIN=$JODD_AI_MCP_TEST_BIN
-else
-  (cd "$here" && cargo build --quiet --locked -p jodd-ai-mcp) || { echo "FAIL: cannot build jodd-ai-mcp (needs cargo; or set JODD_AI_MCP_TEST_BIN)"; exit 1; }
-  MCPBIN=${CARGO_TARGET_DIR:-$here/target}/debug/jodd-ai-mcp
-fi
-case $MCPBIN in /*) ;; *) MCPBIN=$(pwd)/$MCPBIN ;; esac
+# ---- jodd-ai-mcp (built at the top). enable / disable / list / auto-enable / adopt-keys drive it
+# with the debug-only seams JODD_AI_MCP_POLICY (the policy file) and JODD_AI_MCP_FAKE_UID (0 =
+# "root", for the root-only policy edits).
 KEYA=AAAAC3NzaC1lZDI1NTE5AAAAIPhonePhonePhonePhone
 mkdir -p "$t/m/bin" "$t/m2/bin" "$t/mhome"
 printf '#!/bin/sh\necho fake\n' > "$t/m/bin/claude"; chmod +x "$t/m/bin/claude"; cp "$t/m/bin/claude" "$t/m/bin/codex"
@@ -421,6 +425,32 @@ has "adopt-keys names the symlink" "$out" 'symlink'
 if cmp -s "$t/secret.before" "$t/secret" && [ -L "$t/ahome2/.ssh/authorized_keys" ]; then ok; else bad "adopt-keys changed the symlink or its target"; fi
 hasnt "adopt-keys on a link: still never outside su" "$(cat "$t/mcp.calls")" '^NOT-under-su'
 
+# keys_and_status_read_keys_as_account (R28): `keys` and status's key count come from
+# `jodd-ai-mcp admin scan-keys` run as the account through su; root never opens the file.
+# (status also probes the CLIs through the real `su -l`: a failing `su` first on PATH stands in,
+# so nothing here can ask for a password.)
+mkdir -p "$t/failsubin"
+printf '#!/bin/sh\necho "su: Authentication failure" >&2\nexit 1\n' > "$t/failsubin/su"; chmod +x "$t/failsubin/su"
+NOSU="$t/failsubin:$SYSPATH"
+: > "$t/su.users"; : > "$t/mcp.calls"
+out=$(env JODD_AI_SU="$t/stubsu" JODD_AI_HOST_CONF="$t/conf-a" JODD_AI_MCP_BIN="$t/mcpwrap" sh "$H" keys 2>&1); rc=$?
+check "keys as the account (rc)" "$rc" "0"
+check "keys lists the account's key ids" "$out" "jodd-ai-77777777"
+check "keys: su was asked for the account" "$(sort -u "$t/su.users")" "jodd-ai"
+has "keys: scan-keys ran under su" "$(cat "$t/mcp.calls")" '^under-su admin scan-keys$'
+hasnt "keys: the binary never ran outside su" "$(cat "$t/mcp.calls")" '^NOT-under-su'
+: > "$t/mcp.calls"
+out=$(env PATH="$NOSU" JODD_AI_SU="$t/stubsu" JODD_AI_HOST_CONF="$t/conf-a" JODD_AI_MCP_BIN="$t/mcpwrap" sh "$H" status 2>&1)
+has "status counts the keys through scan-keys" "$out" '^jodd keys:  1$'
+has "status: scan-keys ran under su" "$(cat "$t/mcp.calls")" '^under-su admin scan-keys$'
+hasnt "status: the binary only ran under su for the keys" "$(cat "$t/mcp.calls")" '^NOT-under-su admin scan-keys'
+# a planted link: keys refuses (through the binary) and the target is not read
+out=$(env JODD_AI_SU="$t/stubsu" JODD_AI_HOST_CONF="$t/conf-a2" JODD_AI_MCP_BIN="$t/mcpwrap" sh "$H" keys 2>&1); rc=$?
+check "keys on a symlinked file (rc)" "$rc" "1"
+has "keys on a symlinked file names it" "$out" 'symlink'
+hasnt "keys on a symlinked file lists nothing from its target" "$out" '^jodd-ai-88888888'
+has "status on a symlinked file says the count is unknown" "$(env PATH="$NOSU" JODD_AI_SU="$t/stubsu" JODD_AI_HOST_CONF="$t/conf-a2" JODD_AI_MCP_BIN="$t/mcpwrap" sh "$H" status 2>&1)" '^jodd keys:  ? (cannot read them as jodd-ai: .*symlink'
+
 # status_lists_unadopted_lines: status shows the binary, the policy state, and every jodd-ai-*
 # line whose forced command is not jodd-ai-mcp.
 mkdir -p "$t/shome/.ssh"; chmod 700 "$t/shome/.ssh"
@@ -459,6 +489,32 @@ has "doctor: an invalid policy is a FIX" "$(sh_ "$t/s-bad.toml" doctor 2>&1)" '^
 has "doctor: a missing policy is a FIX" "$(sh_ "$t/s-none.toml" doctor 2>&1)" '^FIX .*no policy at'
 printf 'max_concurrent_runs = 0\n' > "$t/s-zero.toml"
 has "doctor: max_concurrent_runs = 0 is a FIX" "$(sh_ "$t/s-zero.toml" doctor 2>&1)" '^FIX .*max_concurrent_runs = 0'
+hasnt "doctor: a 0644 policy in a closed dir is not called writable by others" "$(sh_ "$t/s-ok.toml" doctor 2>&1)" '^FIX .*can be changed by others than root'
+
+# doctor_policy_check_fails_closed: when the step as the account does not run (su refused, no
+# terminal for sudo), doctor says it could not check - never "ok, cannot change". And a policy
+# that group or others can write is a FIX from root's side, whoever the account is.
+sed -e 's|^JODD_AI_USER=.*|JODD_AI_USER=somebody-else|' "$t/conf-s" > "$t/conf-f"
+: > "$t/s-666.toml"; chmod 666 "$t/s-666.toml"
+out=$(env PATH="$NOSU" JODD_AI_SU="$t/failsubin/su" JODD_AI_HOST_CONF="$t/conf-f" JODD_AI_MCP_POLICY="$t/s-666.toml" sh "$H" doctor 2>&1); rc=$?
+check "doctor with a failing su fails (rc)" "$rc" "1"
+has "doctor: could not check as the account, says so" "$out" '^FIX .*could not check as somebody-else.*sudo jodd-ai-host doctor'
+hasnt "doctor: a failed check is never ok" "$out" '^ok .*cannot change the policy'
+hasnt "doctor: a failed check never claims it can read" "$out" '^ok .*can read the policy'
+has "doctor: a 0666 policy is a FIX from root's side" "$out" "^FIX .*s-666.toml (-rw-rw-rw-) can be changed by others than root"
+has "doctor: the keys could not be read as the account" "$out" '^FIX .*cannot read somebody-else.s keys'
+out=$(sh_ "$t/s-666.toml" doctor 2>&1)
+has "doctor: a 0666 policy (su working) is also a FIX from root's side" "$out" "^FIX .*s-666.toml (-rw-rw-rw-) can be changed by others than root"
+# doctor reads scan-keys' stdout only: a line on its stderr is never taken for a key
+cat > "$t/noisy" <<NOISY
+#!/bin/sh
+echo "deadbeef  legacy  /x/.jodd/ai-run-v2" >&2
+exec "$MCPBIN" "\$@"
+NOISY
+chmod +x "$t/noisy"
+out=$(env PATH="$SYSPATH" JODD_AI_HOST_CONF="$t/conf-s" JODD_AI_MCP_BIN="$t/noisy" JODD_AI_MCP_POLICY="$t/s-ok.toml" sh "$H" doctor 2>&1)
+hasnt "doctor: scan-keys' stderr is not a key" "$out" 'deadbeef'
+has "doctor: ... while its stdout still is" "$out" '^WARN .*jodd-ai-11111111'
 
 # linux_installer_rejects_bad_checksum: the installers' binary step (lib/mcp.sh, which
 # install/linux.sh runs as `mcp_install /usr/local/bin/jodd-ai-mcp root`) verifies the SHA-256
@@ -467,8 +523,11 @@ has "doctor: max_concurrent_runs = 0 is a FIX" "$(sh_ "$t/s-zero.toml" doctor 2>
 # for root's `install -o root` and records its arguments.
 infile "linux installer: installs jodd-ai-mcp root:root through lib/mcp.sh" "$here/install/linux.sh" 'mcp_install /usr/local/bin/jodd-ai-mcp root'
 infile "linux installer: runs auto-enable" "$here/install/linux.sh" '"$helper" auto-enable'
-mi() { sh -c '. "$1"; say() { echo "$*"; }; warn() { echo "$*" >&2; }; shift; "$@"' sh "$here/lib/mcp.sh" "$@"; }
-tgt=$(mi mcp_target)
+# mi FUNCTION ARGS...: run a lib/mcp.sh function. A script, not a shell function, so that
+# `VAR=value mi ...` is scoped to that one call (sh may keep it after a function call).
+printf '#!/bin/sh\n. "%s"\nsay() { echo "$*"; }; warn() { echo "$*" >&2; }\n"$@"\n' "$here/lib/mcp.sh" > "$t/mi"; chmod +x "$t/mi"
+MI=$t/mi
+tgt=$("$MI" mcp_target)
 asset=jodd-ai-mcp-9.9.9-$tgt.tar.gz
 mkdir -p "$t/rel/x" "$t/inst/bin" "$t/fakeinst"
 printf '#!/bin/sh\necho "jodd-ai-mcp 9.9.9"\n' > "$t/rel/x/jodd-ai-mcp"; chmod 755 "$t/rel/x/jodd-ai-mcp"
@@ -483,19 +542,19 @@ chmod +x "$t/fakeinst/install"
 printf 'OLD\n' > "$t/inst/bin/jodd-ai-mcp"
 : > "$t/install.args"
 printf '%s  %s\n' 0000000000000000000000000000000000000000000000000000000000000000 "$asset" > "$t/rel/$asset.sha256"
-out=$(PATH="$t/fakeinst:$PATH" JODD_AI_MCP_BASE_URL="file://$t/rel" JODD_AI_MCP_VERSION=9.9.9 mi mcp_install "$t/inst/bin/jodd-ai-mcp" root 2>&1); rc=$?
+out=$(PATH="$t/fakeinst:$PATH" JODD_AI_MCP_BASE_URL="file://$t/rel" JODD_AI_MCP_VERSION=9.9.9 "$MI" mcp_install "$t/inst/bin/jodd-ai-mcp" root 2>&1); rc=$?
 check "linux installer: a bad checksum is refused (rc)" "$rc" "1"
 has "linux installer: says SHA-256 mismatch" "$out" 'SHA-256 mismatch'
 check "linux installer: the old binary is untouched" "$(cat "$t/inst/bin/jodd-ai-mcp")" "OLD"
 check "linux installer: nothing was installed" "$(cat "$t/install.args")" ""
 check "linux installer: no temp file left next to it" "$(ls -A "$t/inst/bin")" "jodd-ai-mcp"
 # a .sha256 for another asset name is refused too
-printf '%s  %s\n' "$(mi mcp_sha256 "$t/rel/$asset")" "jodd-ai-mcp-9.9.9-other.tar.gz" > "$t/rel/$asset.sha256"
-PATH="$t/fakeinst:$PATH" JODD_AI_MCP_BASE_URL="file://$t/rel" JODD_AI_MCP_VERSION=9.9.9 mi mcp_install "$t/inst/bin/jodd-ai-mcp" root >/dev/null 2>&1
+printf '%s  %s\n' "$("$MI" mcp_sha256 "$t/rel/$asset")" "jodd-ai-mcp-9.9.9-other.tar.gz" > "$t/rel/$asset.sha256"
+PATH="$t/fakeinst:$PATH" JODD_AI_MCP_BASE_URL="file://$t/rel" JODD_AI_MCP_VERSION=9.9.9 "$MI" mcp_install "$t/inst/bin/jodd-ai-mcp" root >/dev/null 2>&1
 check "linux installer: a checksum naming another asset is refused (rc)" "$?" "1"
 # the right checksum installs it, root-owned 0755, through a rename
-printf '%s  %s\n' "$(mi mcp_sha256 "$t/rel/$asset")" "$asset" > "$t/rel/$asset.sha256"
-out=$(PATH="$t/fakeinst:$PATH" JODD_AI_MCP_BASE_URL="file://$t/rel" JODD_AI_MCP_VERSION=9.9.9 mi mcp_install "$t/inst/bin/jodd-ai-mcp" root 2>&1); rc=$?
+printf '%s  %s\n' "$("$MI" mcp_sha256 "$t/rel/$asset")" "$asset" > "$t/rel/$asset.sha256"
+out=$(PATH="$t/fakeinst:$PATH" JODD_AI_MCP_BASE_URL="file://$t/rel" JODD_AI_MCP_VERSION=9.9.9 "$MI" mcp_install "$t/inst/bin/jodd-ai-mcp" root 2>&1); rc=$?
 check "linux installer: a good release installs (rc)" "$rc" "0"
 has "linux installer: install -o root -g root -m 0755" "$(cat "$t/install.args")" '^-o root -g root -m 0755 '
 check "linux installer: the new binary is in place" "$("$t/inst/bin/jodd-ai-mcp")" "jodd-ai-mcp 9.9.9"
@@ -503,20 +562,53 @@ check "linux installer: no temp file left after an install" "$(ls -A "$t/inst/bi
 # an archive with anything besides the binary is refused before it is unpacked
 printf 'x\n' > "$t/rel/x/extra"
 (cd "$t/rel/x" && tar -czf "$t/rel/$asset" jodd-ai-mcp extra)
-printf '%s  %s\n' "$(mi mcp_sha256 "$t/rel/$asset")" "$asset" > "$t/rel/$asset.sha256"
+printf '%s  %s\n' "$("$MI" mcp_sha256 "$t/rel/$asset")" "$asset" > "$t/rel/$asset.sha256"
 printf 'OLD\n' > "$t/inst/bin/jodd-ai-mcp"
-PATH="$t/fakeinst:$PATH" JODD_AI_MCP_BASE_URL="file://$t/rel" JODD_AI_MCP_VERSION=9.9.9 mi mcp_install "$t/inst/bin/jodd-ai-mcp" root >/dev/null 2>&1
+PATH="$t/fakeinst:$PATH" JODD_AI_MCP_BASE_URL="file://$t/rel" JODD_AI_MCP_VERSION=9.9.9 "$MI" mcp_install "$t/inst/bin/jodd-ai-mcp" root >/dev/null 2>&1
 check "linux installer: an archive with more than the binary is refused (rc)" "$?" "1"
 check "linux installer: ... and the old binary stays" "$(cat "$t/inst/bin/jodd-ai-mcp")" "OLD"
 # an unreachable release names the problem and installs nothing
-PATH="$t/fakeinst:$PATH" JODD_AI_MCP_BASE_URL="file://$t/nosuch" JODD_AI_MCP_VERSION=9.9.9 mi mcp_install "$t/inst/bin/jodd-ai-mcp" root >/dev/null 2>&1
+PATH="$t/fakeinst:$PATH" JODD_AI_MCP_BASE_URL="file://$t/nosuch" JODD_AI_MCP_VERSION=9.9.9 "$MI" mcp_install "$t/inst/bin/jodd-ai-mcp" root >/dev/null 2>&1
 check "linux installer: a missing release (rc)" "$?" "1"
+# keep_installed_binary_without_network (R29): a re-run that cannot download keeps a WORKING
+# installed binary with a warning and succeeds; a fresh install, or a broken installed binary,
+# still needs the download; a bad checksum is refused even with a binary installed.
+printf '#!/bin/sh\necho "jodd-ai-mcp 1.2.3"\n' > "$t/inst/bin/jodd-ai-mcp"; chmod 755 "$t/inst/bin/jodd-ai-mcp"
+cp "$t/inst/bin/jodd-ai-mcp" "$t/inst/working.before"
+out=$(PATH="$t/fakeinst:$PATH" JODD_AI_MCP_BASE_URL="file://$t/nosuch" JODD_AI_MCP_VERSION=9.9.9 "$MI" mcp_install "$t/inst/bin/jodd-ai-mcp" root 2>&1); rc=$?
+check "no network, a working binary installed: succeeds (rc)" "$rc" "0"
+has "no network: warns that it keeps the installed one" "$out" 'WARNING: could not download jodd-ai-mcp; keeping the one installed .*jodd-ai-mcp 1.2.3'
+if cmp -s "$t/inst/working.before" "$t/inst/bin/jodd-ai-mcp"; then ok; else bad "no network: the installed binary changed"; fi
+# the latest-release lookup failing (no network at all) keeps it too
+mkdir -p "$t/nonet"; printf '#!/bin/sh\nexit 6\n' > "$t/nonet/curl"; chmod +x "$t/nonet/curl"
+out=$(PATH="$t/nonet:$t/fakeinst:$PATH" "$MI" mcp_install "$t/inst/bin/jodd-ai-mcp" root 2>&1); rc=$?
+check "no network for the latest lookup, a working binary: succeeds (rc)" "$rc" "0"
+has "no network for the latest lookup: keeps the installed one" "$out" 'keeping the one installed'
+rm -f "$t/inst/bin/jodd-ai-mcp"
+PATH="$t/fakeinst:$PATH" JODD_AI_MCP_BASE_URL="file://$t/nosuch" JODD_AI_MCP_VERSION=9.9.9 "$MI" mcp_install "$t/inst/bin/jodd-ai-mcp" root >/dev/null 2>&1
+check "no network, nothing installed: a fresh install fails (rc)" "$?" "1"
+PATH="$t/nonet:$t/fakeinst:$PATH" "$MI" mcp_install "$t/inst/bin/jodd-ai-mcp" root >/dev/null 2>&1
+check "no network for the latest lookup, nothing installed: fails (rc)" "$?" "1"
+printf '#!/bin/sh\nexit 1\n' > "$t/inst/bin/jodd-ai-mcp"; chmod 755 "$t/inst/bin/jodd-ai-mcp"
+PATH="$t/fakeinst:$PATH" JODD_AI_MCP_BASE_URL="file://$t/nosuch" JODD_AI_MCP_VERSION=9.9.9 "$MI" mcp_install "$t/inst/bin/jodd-ai-mcp" root >/dev/null 2>&1
+check "no network, a broken binary installed: fails (rc)" "$?" "1"
+cp "$t/inst/working.before" "$t/inst/bin/jodd-ai-mcp"
+(cd "$t/rel/x" && rm -f extra && tar -czf "$t/rel/$asset" jodd-ai-mcp)
+printf '%s  %s\n' 0000000000000000000000000000000000000000000000000000000000000000 "$asset" > "$t/rel/$asset.sha256"
+PATH="$t/fakeinst:$PATH" JODD_AI_MCP_BASE_URL="file://$t/rel" JODD_AI_MCP_VERSION=9.9.9 "$MI" mcp_install "$t/inst/bin/jodd-ai-mcp" root >/dev/null 2>&1
+check "a bad checksum is refused even with a working binary installed (rc)" "$?" "1"
+if cmp -s "$t/inst/working.before" "$t/inst/bin/jodd-ai-mcp"; then ok; else bad "bad checksum: the installed binary changed"; fi
+infile "every release download allows only https redirects" "$here/lib/mcp.sh" "--proto-redir '=https'"
+check "no release curl call lacks --proto-redir" "$(grep -c 'curl --proto' "$here/lib/mcp.sh")" "$(grep -c -- "--proto-redir '=https'" "$here/lib/mcp.sh")"
+# the image's entrypoint bounds the probes it makes through the account's login shell
+infile "entrypoint: auto-enable is bounded" "$here/docker/entrypoint.sh" 'timeout -k 5 20 jodd-ai-host auto-enable'
+
 # targets: Linux on x86_64 and arm64
 mkdir -p "$t/uname"
 printf '#!/bin/sh\ncase $1 in -s) echo Linux ;; -m) echo "$FAKE_ARCH" ;; esac\n' > "$t/uname/uname"; chmod +x "$t/uname/uname"
-check "target: Linux x86_64" "$(FAKE_ARCH=x86_64 PATH="$t/uname:$PATH" mi mcp_target)" "x86_64-unknown-linux-musl"
-check "target: Linux aarch64" "$(FAKE_ARCH=aarch64 PATH="$t/uname:$PATH" mi mcp_target)" "aarch64-unknown-linux-musl"
-FAKE_ARCH=riscv64 PATH="$t/uname:$PATH" mi mcp_target >/dev/null 2>&1; check "target: an unsupported machine (rc)" "$?" "1"
+check "target: Linux x86_64" "$(FAKE_ARCH=x86_64 PATH="$t/uname:$PATH" "$MI" mcp_target)" "x86_64-unknown-linux-musl"
+check "target: Linux aarch64" "$(FAKE_ARCH=aarch64 PATH="$t/uname:$PATH" "$MI" mcp_target)" "aarch64-unknown-linux-musl"
+FAKE_ARCH=riscv64 PATH="$t/uname:$PATH" "$MI" mcp_target >/dev/null 2>&1; check "target: an unsupported machine (rc)" "$?" "1"
 
 # usage
 sh "$H" nosuchcommand >/dev/null 2>&1; check "unknown command exits 2" "$?" "2"

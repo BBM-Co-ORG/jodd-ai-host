@@ -47,4 +47,11 @@ docker exec "$name" jodd-ai-host list | grep -qx 'claude  disabled  /home/jodd-a
 docker exec "$name" sh -c 'test -L /etc/jodd-ai-host/policy.toml' || fail "the /etc link was replaced by a file"
 docker exec "$name" su -s /bin/sh jodd-ai -c 'test ! -w /var/lib/jodd-ai-host/policy.toml && test ! -w /var/lib/jodd-ai-host' || fail "jodd-ai can change the policy"
 docker exec "$name" jodd-ai-host doctor || :
+# A login profile that hangs (it is the account's to edit) must not keep sshd from starting:
+# the entrypoint's probes through the login shell are bounded.
+docker exec "$name" su -s /bin/sh jodd-ai -c 'echo "sleep 600" >> ~/.profile'
+docker restart "$name" >/dev/null
+wait_log 'jodd-ai-host ready' 3 90
+docker logs "$name" 2>&1 | grep -q 'took over 20 s' || fail "no timeout message for the hanging profile"
+docker exec "$name" sh -c 'pgrep -x sshd >/dev/null' || fail "sshd is not running after a hanging profile"
 echo "image smoke: ok"

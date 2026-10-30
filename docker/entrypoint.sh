@@ -94,10 +94,15 @@ case "${JODD_AI_PASSWORD:-}" in
 esac
 
 # On every start: enable each CLI found that the policy has no decision for (a `jodd-ai-host
-# disable` is a decision, and survives every restart and image update).
-jodd-ai-host auto-enable || echo "jodd-ai-host: the policy was not updated (message above). Check: docker compose exec ai-host jodd-ai-host doctor" >&2
+# disable` is a decision, and survives every restart and image update). It probes through the
+# account's login shell, whose rc files the account controls: bounded, so a hanging ~/.bashrc
+# cannot keep sshd from starting (timeout kills the whole process group).
+timeout -k 5 20 jodd-ai-host auto-enable \
+  || echo "jodd-ai-host: the policy was not updated (failed, or took over 20 s: is ~/.profile or ~/.bashrc of jodd-ai waiting for input?). Check: docker compose exec ai-host jodd-ai-host doctor" >&2
 # CLIs: install on first start, in the background so sshd is up at once; then the same auto-enable.
-if [ ! -x /home/jodd-ai/.local/bin/claude ] || ! su -l jodd-ai -s /bin/sh -c 'command -v codex' >/dev/null 2>&1; then
+# (that login-shell probe is bounded too; a timeout reads as "codex missing", which only starts the
+# background job)
+if [ ! -x /home/jodd-ai/.local/bin/claude ] || ! timeout -k 5 10 su -l jodd-ai -s /bin/sh -c 'command -v codex' >/dev/null 2>&1; then
   ( echo "jodd-ai-host: installing claude and codex (first start)…"
     if jodd-ai-host update-clis; then
       echo "jodd-ai-host: CLIs installed. Sign in: docker compose exec ai-host jodd-ai-host signin claude | codex"

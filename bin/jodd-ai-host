@@ -282,8 +282,16 @@ case $cmd in
     echo "host key:   $fp"
     if grep -q 'PasswordAuthentication yes' "$JODD_AI_DROPIN" 2>/dev/null; then echo "password:   on (Jodd can run Setup / Update)"; else echo "password:   off (run: sudo jodd-ai-host unlock, before Setup / Update)"; fi
     for c in claude codex; do p=$(cli_path "$c"); if [ -n "$p" ]; then echo "$c:  $p ($(cli_version "$c"))"; else echo "$c:  not installed (run: sudo jodd-ai-host update-clis)"; fi; done
-    n=$(grep -ac ' jodd-ai-[0-9a-f]\{8\}$' "$AK" 2>/dev/null)
-    echo "jodd keys:  ${n:-0}"
+    # The keys are read by jodd-ai-mcp AS THE ACCOUNT; root never opens the file.
+    scan="" scan_ok=0
+    if [ -x "$MCP" ] && scan=$(mcp_as_account scan-keys </dev/null 2>"$tmp_err"); then scan_ok=1; fi
+    if [ "$scan_ok" = 1 ]; then
+      echo "jodd keys:  $(printf '%s\n' "$scan" | grep -c .)"
+    elif [ -x "$MCP" ]; then
+      echo "jodd keys:  ? (cannot read them as $U: $(tr '\n' ' ' < "$tmp_err"))"
+    else
+      echo "jodd keys:  ? (jodd-ai-mcp, which reads them, is not installed)"
+    fi
     if [ -x "$MCP" ]; then
       echo "jodd-ai-mcp: $("$MCP" --version 2>/dev/null || echo "does not run ($MCP); re-run the installer")"
       # (a TOML error spans lines: flatten it to one)
@@ -298,17 +306,13 @@ case $cmd in
         echo "policy:     ok ($POLICY)"
       fi
       printf '%s\n' "$lst" | sed 's/^/  /'
-      # Every jodd-ai-* line whose forced command is not jodd-ai-mcp, read as the account.
-      if scan=$(mcp_as_account scan-keys </dev/null 2>"$tmp_err"); then
-        printf '%s\n' "$scan" | while read -r id kind cmdline; do
-          case $kind in
-            legacy) echo "key jodd-ai-$id: not on jodd-ai-mcp (runs $cmdline); fix: sudo jodd-ai-host adopt-keys" ;;
-            other)  echo "key jodd-ai-$id: not on jodd-ai-mcp (runs $cmdline); adopt-keys cannot re-point it: edit it by hand, or sudo jodd-ai-host revoke $id" ;;
-          esac
-        done
-      else
-        echo "keys:       cannot read them as $U: $(cat "$tmp_err" 2>/dev/null)"
-      fi
+      # Every jodd-ai-* line whose forced command is not jodd-ai-mcp.
+      printf '%s\n' "$scan" | while read -r id kind cmdline; do
+        case $kind in
+          legacy) echo "key jodd-ai-$id: not on jodd-ai-mcp (runs $cmdline); fix: sudo jodd-ai-host adopt-keys" ;;
+          other)  echo "key jodd-ai-$id: not on jodd-ai-mcp (runs $cmdline); adopt-keys cannot re-point it: edit it by hand, or sudo jodd-ai-host revoke $id" ;;
+        esac
+      done
     else
       echo "jodd-ai-mcp: not installed ($MCP); re-run the installer"
     fi ;;
@@ -323,7 +327,11 @@ case $cmd in
   lock)   need_root; write_dropin yes; echo "Password login for $U is off. Before Setup or Update in Jodd: sudo jodd-ai-host unlock" ;;
   unlock) need_root; write_dropin no;  echo "Password login for $U is on. After Setup or Update in Jodd: sudo jodd-ai-host lock" ;;
   update-clis) need_root; install_clis ;;
-  keys) need_home; grep -a ' jodd-ai-[0-9a-f]\{8\}$' "$AK" 2>/dev/null | awk '{print $NF}' ;;
+  keys)
+    # Read by jodd-ai-mcp as the account (root never opens the file); stdout only.
+    need_home; need_mcp
+    scan=$(mcp_as_account scan-keys </dev/null 2>"$tmp_err") || die "cannot read the keys of $U: $(tr '\n' ' ' < "$tmp_err")"
+    printf '%s\n' "$scan" | awk 'NF { print "jodd-ai-" $1 }' ;;
   revoke)
     need_root
     case ${1:-} in [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;; *) echo "usage: jodd-ai-host revoke <8-hex-id>  (see: jodd-ai-host keys)" >&2; exit 2 ;; esac
