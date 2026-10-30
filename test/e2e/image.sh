@@ -150,14 +150,13 @@ for req in 'sh -c id' 'id' 'jodd-ai-mcp; id' 'jodd-ai-mcp admin list' 'admin lis
     || tfail "'$req': rc $rc, stdout '$(cat "$out")', stderr '$(cat "$err")'"
 done
 tx 'jodd-ai-host list' | grep -qx 'codex  enabled  /usr/local/bin/codex' || tfail "an admin request through the key changed the policy"
-# a terminal is refused (restrict = no-pty); the forced command still runs, without one
+# a terminal is refused (restrict = no-pty; a client that asked for one with -t then gives up)
 rc=0; E2E_SSH_EXTRA=-tt "$E2E_KD/ssh-$K1" 'jodd-ai-run 2 status' </dev/null > "$out" 2> "$err" || rc=$?
 grep -q 'PTY allocation request failed' "$err" || tfail "-tt: no pty refusal (rc $rc, stderr '$(cat "$err")')"
-grep -q '^version=2' "$out" || tfail "-tt: the forced command did not run"
 # no forwarding (restrict = no-port-forwarding): ssh -W gets "administratively prohibited"
 rc=0; E2E_SSH_EXTRA='-W 127.0.0.1:22' "$E2E_KD/ssh-$K1" </dev/null > "$out" 2> "$err" || rc=$?
 [ "$rc" != 0 ] && grep -qi 'prohibited' "$err" || tfail "-W: rc $rc, stderr '$(cat "$err")'"
-echo "ok: every other command gets 64, no pty, no forwarding"
+echo "ok: every other command gets 64, no terminal, no forwarding"
 
 # ---------------------------------------------------------------------------------------------
 tc=e2e_cancel_by_hangup_kills_cli_within_6s
