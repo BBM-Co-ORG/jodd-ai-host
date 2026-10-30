@@ -559,6 +559,20 @@ check "linux installer: a good release installs (rc)" "$rc" "0"
 has "linux installer: install -o root -g root -m 0755" "$(cat "$t/install.args")" '^-o root -g root -m 0755 '
 check "linux installer: the new binary is in place" "$("$t/inst/bin/jodd-ai-mcp")" "jodd-ai-mcp 9.9.9"
 check "linux installer: no temp file left after an install" "$(ls -A "$t/inst/bin")" "jodd-ai-mcp"
+# a release whose binary says it is another version is refused: the installer requires
+# `jodd-ai-mcp <the version it asked for>`, and leaves the installed binary as it was
+printf '#!/bin/sh\necho "jodd-ai-mcp 9.9.8"\n' > "$t/rel/x/jodd-ai-mcp"
+(cd "$t/rel/x" && tar -czf "$t/rel/$asset" jodd-ai-mcp)
+printf '%s  %s\n' "$("$MI" mcp_sha256 "$t/rel/$asset")" "$asset" > "$t/rel/$asset.sha256"
+cp "$t/inst/bin/jodd-ai-mcp" "$t/inst/v999.before"
+out=$(PATH="$t/fakeinst:$PATH" JODD_AI_MCP_BASE_URL="file://$t/rel" JODD_AI_MCP_VERSION=9.9.9 "$MI" mcp_install "$t/inst/bin/jodd-ai-mcp" root 2>&1); rc=$?
+check "linux installer: a binary reporting another version is refused (rc)" "$rc" "1"
+has "linux installer: ... and says which version it reported" "$out" "says it is 'jodd-ai-mcp 9.9.8', not 'jodd-ai-mcp 9.9.9'"
+if cmp -s "$t/inst/v999.before" "$t/inst/bin/jodd-ai-mcp"; then ok; else bad "version mismatch: the installed binary changed"; fi
+check "linux installer: no temp file left after a version mismatch" "$(ls -A "$t/inst/bin")" "jodd-ai-mcp"
+printf '#!/bin/sh\necho "jodd-ai-mcp 9.9.9"\n' > "$t/rel/x/jodd-ai-mcp"
+(cd "$t/rel/x" && tar -czf "$t/rel/$asset" jodd-ai-mcp)
+printf '%s  %s\n' "$("$MI" mcp_sha256 "$t/rel/$asset")" "$asset" > "$t/rel/$asset.sha256"
 # an archive with anything besides the binary is refused before it is unpacked
 printf 'x\n' > "$t/rel/x/extra"
 (cd "$t/rel/x" && tar -czf "$t/rel/$asset" jodd-ai-mcp extra)

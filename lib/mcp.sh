@@ -137,7 +137,10 @@ mcp_install_in() {
     "jodd-ai-mcp "*) ;;
     *) rm -f "$_new"; warn "the downloaded jodd-ai-mcp does not run on this machine; nothing was installed."; return 1 ;;
   esac
-  [ "$_said" = "jodd-ai-mcp $_ver" ] || warn "note: the release $_ver says it is '$_said'."
+  # ... and be the version asked for: a release whose binary reports another version is broken.
+  if [ "$_said" != "jodd-ai-mcp $_ver" ]; then
+    rm -f "$_new"; warn "the downloaded jodd-ai-mcp says it is '$_said', not 'jodd-ai-mcp $_ver'; nothing was installed${_dest:+; $_dest is unchanged}."; return 1
+  fi
   if ! mv -f "$_new" "$_dest"; then rm -f "$_new"; warn "cannot move the new binary to $_dest; nothing was installed."; return 1; fi
   say "installed $_dest ($_said)"
 }
