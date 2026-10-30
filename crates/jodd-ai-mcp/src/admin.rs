@@ -1,4 +1,4 @@
-//! `jodd-ai-mcp admin …`: what the `jodd-ai-host` helper calls (spec §5.3).
+//! `jodd-ai-mcp admin …`: what the `jodd-ai-host` helper calls.
 //! The policy file has one owner, this binary; the helper never writes it.
 //!
 //! Exit 0 on success, 2 on a usage error, 1 otherwise. Every message names
@@ -38,7 +38,8 @@ sudo jodd-ai-host adopt-keys, jodd-ai-host doctor.
 ";
 
 /// The effective uid; in debug builds only, `JODD_AI_MCP_FAKE_UID` stands in
-/// (ruling R12), so the root-only paths are testable without root.
+/// (a release build ignores it, like every test override), so the root-only
+/// paths are testable without root.
 fn uid() -> u32 {
     if let Some(v) = crate::test_override("JODD_AI_MCP_FAKE_UID").and_then(|v| v.parse().ok()) {
         return v;
@@ -241,7 +242,7 @@ fn enable(
     let Some(mut policy) = load_for_edit(policy_path) else {
         return FAILED;
     };
-    // auto-enable (spec §5.3): an entry, enabled OR disabled, is a decision.
+    // auto-enable: an entry, enabled OR disabled, is a decision.
     if only_if_absent {
         if let Some(hp) = policy.harness.get(&h) {
             let (now, other) = if hp.enabled {

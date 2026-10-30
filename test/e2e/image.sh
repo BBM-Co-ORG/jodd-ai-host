@@ -211,7 +211,7 @@ tc=e2e_policy_survives_image_update
 echo "== $tc"
 fp1=$(tx 'jodd-ai-host fingerprint')
 # A live session listed both harnesses; codex is disabled before its call: the call obeys the
-# policy as it is now (ruling R19), and says how to enable it.
+# policy as it is now, and says how to enable it.
 hold=$E2E_KD/hold; rm -f "$hold"
 e2e_mcp "$K1" --hold "$hold" --call infer '{"harness":"codex","prompt":"x"}' > "$out" &
 cpid=$!

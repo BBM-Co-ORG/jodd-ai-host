@@ -8,8 +8,8 @@
 //! - else appended to `/var/log/jodd-ai-host/calls.log` (the Docker image runs
 //!   no syslog daemon; the installer or entrypoint creates the directory,
 //!   owned by the AI account, mode 0700);
-//! - in debug builds only (ruling R12), `JODD_AI_MCP_LOG_FILE` overrides both,
-//!   so tests never touch the system log (ruling R16).
+//! - in debug builds only (a release build ignores every test override),
+//!   `JODD_AI_MCP_LOG_FILE` overrides both, so tests never touch the system log.
 //!
 //! Logging failures are ignored: a call never fails because it could not be
 //! logged.

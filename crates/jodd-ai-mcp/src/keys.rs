@@ -1,9 +1,9 @@
 //! `authorized_keys` management for the AI account: `forget` (a client
 //! revoking itself), `scan` (what `doctor` and `status` report) and `adopt`
-//! (re-pointing legacy lines at `jodd-ai-mcp`, spec §10).
+//! (re-pointing legacy lines at `jodd-ai-mcp`).
 //!
-//! Every function edits the CURRENT user's file, found through `$HOME` (ruling
-//! R3: sshd and `su -` both set it; it must be absolute). Root never runs
+//! Every function edits the CURRENT user's file, found through `$HOME` (sshd
+//! and `su -` both set it; it must be absolute). Root never runs
 //! these on the account's behalf: the helper runs them as the account.
 //!
 //! The rules, each a refusal with no change:
@@ -308,7 +308,7 @@ fn adopt_in(home: &Path, uid: u32, mcp_path: &str) -> io::Result<usize> {
 
 /// The re-pointed line for a legacy jodd line, else `None`.
 ///
-/// Never widens what the old line allowed (ruling R22): the new line is
+/// Never widens what the old line allowed: the new line is
 /// `restrict,command="<mcp> --key <id>"` followed only by the old line's
 /// NARROWING options (`from=`, `expiry-time=`, `verify-required`, `no-*`
 /// except `no-touch-required`). A line with any other option (`pty`,
@@ -718,7 +718,7 @@ mod tests {
 
     #[test]
     fn adopt_never_widens_restrict() {
-        // Ruling R22: `pty` after `restrict` would re-enable a PTY, and a line
+        // Adopting never widens: `pty` after `restrict` would re-enable a PTY, and a line
         // that forwarded ports must not keep doing so through jodd-ai-mcp.
         // Any option that is not narrowing leaves the line as it is.
         let h = Home::new();

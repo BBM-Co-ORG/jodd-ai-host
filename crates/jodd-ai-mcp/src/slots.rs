@@ -7,12 +7,13 @@
 //! `flock` locks belong to the open file description, so two acquires in ONE
 //! process (the MCP server's concurrent calls) also exclude each other.
 //!
-//! Where the directory lives (ruling R2): `/run/jodd-ai-host/slots` when it
+//! Where the directory lives (never a shared `/tmp`, where another account
+//! could squat the locks): `/run/jodd-ai-host/slots` when it
 //! exists or can be created and is writable, else a per-user dir
 //! (`$XDG_RUNTIME_DIR/jodd-ai-host/slots`, else `$HOME/.cache/jodd-ai-host/slots`).
 //! Never a shared `/tmp` path: another local user could pre-create it and hold
 //! every slot. Tests point it elsewhere with `JODD_AI_MCP_SLOTS_DIR` (debug
-//! builds only, ruling R12).
+//! builds only; a release build ignores it).
 
 use std::fs::{DirBuilder, File, OpenOptions};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
@@ -27,7 +28,7 @@ const RUN_DIR: &str = "/run/jodd-ai-host/slots";
 pub struct Slots {
     /// Resolved (and created) on the first acquire, never before: only a
     /// `run` makes the lock directory, so a root `status` probe cannot leave
-    /// a root-owned `/run/jodd-ai-host` behind (ruling R14). `None` when no
+    /// a root-owned `/run/jodd-ai-host` behind. `None` when no
     /// usable directory exists: every acquire then fails (closed), rather
     /// than running unbounded.
     dir: OnceLock<Option<PathBuf>>,

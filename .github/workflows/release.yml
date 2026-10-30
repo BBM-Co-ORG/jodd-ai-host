@@ -1,6 +1,6 @@
 name: Release
-# Builds a release: jodd-ai-mcp for four targets (tarball + .sha256 each, ruling R26), the
-# multi-arch host image and the jodd-ai-host-test image client CI pins (spec §6 rule 2).
+# Builds a release: jodd-ai-mcp for four targets (tarball + .sha256 each, in the layout lib/mcp.sh
+# expects), the multi-arch host image and the jodd-ai-host-test image that client CI pins.
 #
 # What gets PUBLISHED is decided once, by the `meta` job's `publish` output, and every push /
 # upload / release step is conditioned on it:
@@ -375,7 +375,7 @@ jobs:
           tag=v$VERSION
           # Idempotent: a re-run (after a failure mid-upload, which can leave a draft that
           # `gh release view` finds) replaces the files and settles the release; it never makes a
-          # second one. GitHub's "Latest" (what the installers resolve, ruling R27) moves with :latest.
+          # second one. GitHub's "Latest" (what the installers resolve through its redirect) moves with :latest.
           if gh release view "$tag" --json tagName,isDraft >/dev/null 2>view-err.txt; then
             echo "$tag exists: replacing its files"
             gh release upload "$tag" assets/* --clobber

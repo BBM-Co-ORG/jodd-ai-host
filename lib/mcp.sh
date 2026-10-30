@@ -2,7 +2,7 @@
 # install/linux.sh and install/macos.sh (which define say / warn); every function returns 1 after
 # saying why, and changes nothing it has not finished.
 #
-# Release assets (one per target, ruling R26):
+# Release assets (one per target; .github/workflows/release.yml makes them):
 #   jodd-ai-mcp-<version>-<target>.tar.gz          exactly one file, jodd-ai-mcp, at its root
 #   jodd-ai-mcp-<version>-<target>.tar.gz.sha256   "<64 hex>  <asset name>" (sha256sum's format)
 # Environment:
@@ -28,7 +28,7 @@ mcp_target() {
   esac
 }
 
-# The latest release's version, from where GitHub redirects /releases/latest (ruling R27: no API,
+# The latest release's version, from where GitHub redirects /releases/latest (no API,
 # no token, no rate limit). Prints e.g. 1.0.0.
 mcp_latest_version() {
   _u=$(curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSLI -o /dev/null -w '%{url_effective}' "$MCP_REPO_URL/releases/latest") || {
@@ -55,7 +55,7 @@ mcp_sha256() {
 # unpacking, unpack into a fresh temp dir, check the binary runs, and only then put it at DEST
 # (owner root, group GROUP, mode 0755) with a rename. On any failure DEST is left as it was.
 # Re-running installs the release again: that is the upgrade. A re-run that cannot reach the
-# release (no network) keeps a WORKING installed binary, with a warning, and succeeds (ruling R29);
+# release (no network) keeps a WORKING installed binary, with a warning, and succeeds;
 # only a fresh install needs the download. A bad checksum or archive always fails.
 mcp_install() {
   _dest=$1 _grp=$2

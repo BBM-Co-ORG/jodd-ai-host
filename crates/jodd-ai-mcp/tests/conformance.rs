@@ -1,7 +1,7 @@
 //! The MCP surface (`jodd-ai-mcp` over stdio), driven through the built binary
 //! exactly as sshd runs it: the fixed argv `--key 3f2a9b1c` and the client's
-//! word in SSH_ORIGINAL_COMMAND. This is the conformance suite of spec §6
-//! rule 3 and §7: any client author can run it against the host.
+//! word in SSH_ORIGINAL_COMMAND. This is the conformance suite of
+//! docs/PROTOCOL.md: any client author can run it against the host.
 //!
 //! Most tests speak MCP through rmcp's own client. Four drive raw JSON-RPC
 //! lines instead, because they need what rmcp's child-process transport hides:
@@ -167,7 +167,7 @@ impl Fx {
 type Client = RunningService<RoleClient, ()>;
 
 /// An rmcp client over the server's stdio; `env` reaches the fake CLIs (the
-/// server passes its environment through, ruling R11). The server's stderr
+/// server passes its environment through, as wrapper v2 did). The server's stderr
 /// goes to `<name>.stderr` in the fixture.
 async fn client_named(fx: &Fx, name: &str, env: &[(&str, &str)]) -> Client {
     let mut cmd = tokio::process::Command::new(BIN);
@@ -1150,7 +1150,7 @@ fn mcp_request_with_extra_words_is_unknown() {
 
 #[tokio::test]
 async fn disable_mid_session_reaches_next_infer() {
-    // Ruling R19: infer re-reads the policy on every call.
+    // infer re-reads the policy on every call: a disable reaches a live session.
     let fx = Fx::both();
     let started = fx.path("cli.started");
     let c = client(&fx, &[("FAKE_STARTED", &started.to_string_lossy())]).await;
@@ -1184,7 +1184,7 @@ async fn disable_mid_session_reaches_next_infer() {
 
 #[test]
 fn oversized_line_drops_connection_without_running() {
-    // Ruling R20: a line over 4 x max_request_bytes + 64 KiB ends the
+    // A line over 4 x max_request_bytes + 64 KiB ends the
     // connection; the server never buffers it whole and runs nothing.
     let fx = Fx::with(
         None,

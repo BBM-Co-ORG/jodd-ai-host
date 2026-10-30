@@ -1,6 +1,6 @@
 # Harness flags: what each one is for
 
-Jodd's local presets may drift from these after the split (spec §7.3).
+Jodd's local presets may drift from these now that the host is its own project; this file and `harness.rs` are what the host runs.
 
 These are the exact argv values in `crates/jodd-ai-mcp/src/harness.rs`. They were measured against real binaries in Jodd's `src-tauri/src/llm/presets.rs` (commit d514d03d). Do not change a flag without re-running the real CLI; a flag that looks redundant is usually there because of a failure that was observed.
 

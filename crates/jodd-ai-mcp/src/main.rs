@@ -20,8 +20,8 @@ use std::path::PathBuf;
 const UNKNOWN: &str = "unknown request";
 const EX_USAGE: i32 = 64;
 
-/// A `JODD_AI_MCP_*` runtime override, honoured only in debug builds (ruling
-/// R12): a release build must not let the AI account point a root-installed
+/// A `JODD_AI_MCP_*` runtime override, honoured only in debug builds: a
+/// release build must not let the AI account point a root-installed
 /// server at a policy or lock dir of its own via its shell rc.
 pub(crate) fn test_override(name: &str) -> Option<String> {
     if cfg!(debug_assertions) {
@@ -95,7 +95,8 @@ async fn dispatch(args: Vec<String>) -> i32 {
                 tokio::io::stderr(),
             )
             .await;
-            // Ruling R9 (serve drains too; this covers any path that did not).
+            // Every pending reap before the exit, or a CLI that ignores TERM
+            // outlives us (serve drains too; this covers any path that did not).
             run::drain_reaps().await;
             code
         }
@@ -104,7 +105,8 @@ async fn dispatch(args: Vec<String>) -> i32 {
         // something else.
         Some("jodd-ai-mcp") if words.len() == 1 => {
             let code = mcp::serve(key, &policy_path()).await;
-            // Ruling R9 (serve drains too; this covers any path that did not).
+            // Every pending reap before the exit, or a CLI that ignores TERM
+            // outlives us (serve drains too; this covers any path that did not).
             run::drain_reaps().await;
             code
         }

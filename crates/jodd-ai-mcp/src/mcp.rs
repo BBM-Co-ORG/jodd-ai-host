@@ -1,4 +1,4 @@
-//! The MCP server (spec §7): `infer` and `forget_key` over stdin/stdout.
+//! The MCP server: `infer` and `forget_key` over stdin/stdout.
 //!
 //! `ServerHandler` is implemented by hand: the `harness` enum in `infer`'s
 //! input schema is built per session from the policy, which rmcp's macros
@@ -19,15 +19,16 @@
 //! by stdin closing (the SSH channel going away), and by TERM, HUP or INT to
 //! the server (a container stop, a `pkill`), which also ends the session with
 //! exit 143 as the legacy shim does. Before the process exits every pending
-//! reap is awaited (ruling R9).
+//! reap is awaited, or a CLI that ignores TERM would outlive it.
 //!
 //! `tools/list` shows the policy as it was when the session started, but
-//! every `infer` re-reads the policy file and obeys that (ruling R19): an
+//! every `infer` re-reads the policy file and obeys that (fail-closed narrowing
+//! must reach live sessions): an
 //! administrator's `disable` or lowered limit reaches a live session at its
 //! next call.
 //!
-//! Each incoming line is capped at `4 × max_request_bytes + 64 KiB` (ruling
-//! R20): a longer line ends the connection, so a client cannot make the
+//! Each incoming line is capped at `4 × max_request_bytes + 64 KiB` (JSON
+//! escaping headroom): a longer line ends the connection, so a client cannot make the
 //! server buffer without bound before `too_large` could even be decided.
 
 use std::path::{Path, PathBuf};
@@ -71,7 +72,8 @@ const CALLS_STOP_WAIT: Duration = Duration::from_secs(3);
 const INFER_ARGS: [&str; 5] = ["harness", "prompt", "system", "schema", "timeout_secs"];
 const DOCTOR: &str = "On the host, run `jodd-ai-host doctor`.";
 
-/// The longest request line accepted, from the session's policy (ruling R20).
+/// The longest request line accepted, from the session's policy: four times
+/// the request limit (JSON escaping headroom) plus 64 KiB.
 pub fn line_cap(max_request_bytes: u64) -> usize {
     let cap = max_request_bytes
         .saturating_mul(4)
@@ -173,7 +175,7 @@ pub async fn serve(key: Option<&str>, policy_path: &Path) -> i32 {
 
 struct Server {
     key: Option<String>,
-    /// Re-read by every `infer` (ruling R19).
+    /// Re-read by every `infer`, so a `disable` reaches a live session.
     policy_path: PathBuf,
     /// The policy at session start: what `tools/list` shows.
     listed: Policy,

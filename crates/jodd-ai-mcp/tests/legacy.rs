@@ -284,7 +284,7 @@ fn run_passes_the_prompt_through_byte_for_byte() {
 
 #[test]
 fn each_run_logs_one_metadata_line_without_text() {
-    // Ruling R16: one line per legacy run, as for an MCP call; never the
+    // One line per legacy run, as for an MCP call; never the
     // prompt or the answer. `status` is not a run and logs nothing.
     let fx = Fx::new(false);
     let secret = "SECRET-PROMPT-51ab";
@@ -409,7 +409,7 @@ fn closing_stdin_mid_run_stops_the_cli_and_cleans_up() {
 
 #[test]
 fn a_cli_that_ignores_term_is_killed_after_stop() {
-    // Ruling R9: the shim waits for the delayed KILL before it exits (wrapper
+    // The shim waits for the delayed KILL before it exits (wrapper
     // v2 detached it instead), so only the CLI's fate is bounded here, not
     // how quickly the shim's exit status reaches a client that has gone.
     let fx = Fx::new(false);
@@ -622,7 +622,8 @@ fn the_watchdog_kills_a_hung_cli_and_cleans_up() {
 
 #[test]
 fn a_timeout_replays_the_cli_stderr_before_its_own_line() {
-    // Ruling R13: what the CLI said before the TERM, then the shim's message.
+    // What the CLI said before the TERM, then the shim's message (stderr
+    // written after the TERM is not replayed: the shim returns at once).
     let fx = Fx::empty();
     let cli = fx.script(
         "cli",
@@ -823,7 +824,7 @@ fn third_concurrent_legacy_run_is_busy() {
 
 #[test]
 fn forget_logs_one_metadata_line() {
-    // Ruling R21: one line per forget, as for MCP's forget_key.
+    // One line per forget, as for MCP's forget_key: revocation is audited.
     let fx = Fx::new(false);
     let ssh = fx.path("home/.ssh");
     std::fs::create_dir(&ssh).unwrap();
@@ -881,7 +882,7 @@ fn forget_logs_one_metadata_line() {
 
 #[test]
 fn forget_without_a_keys_file_exits_70_like_wrapper_v2() {
-    // Ruling R24. wrapper v2: `grep -a -v " jodd-ai-$key$" "$k" > "$n"`
+    // Byte parity with wrapper v2: `grep -a -v " jodd-ai-$key$" "$k" > "$n"`
     // exits 2 on a missing file (with grep's own message), and `[ "$s" -le 1 ]
     // || exit 70` follows. Missing ~/.ssh ends the same way.
     let fx = Fx::new(false);
@@ -1007,7 +1008,7 @@ fn a_stalled_upload_holds_no_slot() {
 
 #[test]
 fn status_and_forget_make_no_slot_dir() {
-    // Ruling R14: only `run` may create the lock directory, so a root
+    // Only `run` may create the lock directory, so a root
     // `status` probe can never leave a root-owned /run/jodd-ai-host behind.
     let fx = Fx::new(false);
     let slots = fx.path("slots/not-yet");

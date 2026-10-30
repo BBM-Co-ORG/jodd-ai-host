@@ -4,7 +4,8 @@
 //! Every test runs the binary with HOME, the policy (`JODD_AI_MCP_POLICY`),
 //! the slots dir, the call log and TMPDIR inside its own temp dir, so no test
 //! touches the real ~/.ssh, /etc, /run or /var/log. Root is faked with the
-//! debug-only `JODD_AI_MCP_FAKE_UID` (ruling R12), so no test needs root.
+//! debug-only `JODD_AI_MCP_FAKE_UID` (a release build ignores it), so no test
+//! needs root.
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;

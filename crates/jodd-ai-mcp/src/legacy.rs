@@ -72,14 +72,15 @@ pub async fn serve(
         // `status` and `forget` answer any version (they come before the check).
         "status" => status(policy, &mut stdout).await,
         "forget" => {
-            // One metadata line, like MCP's `forget_key` (ruling R21).
+            // One metadata line, like MCP's `forget_key`: key revocation
+            // belongs in the audit trail.
             let started = Instant::now();
             let (code, outcome) = forget(key, &mut stderr).await;
             crate::log::call(key, "jodd-ai-run-forget", None, started.elapsed(), outcome);
             code
         }
         "run" => {
-            // One metadata line per run (ruling R16), as for an MCP call.
+            // One metadata line per run, as for an MCP call.
             let started = Instant::now();
             let mut harness = None;
             let (code, outcome) = run_verb(
@@ -121,7 +122,7 @@ async fn status(policy: &Policy, stdout: &mut (impl AsyncWrite + Unpin)) -> i32 
 
 /// `case $key in [0-9a-f]{8}) ;; *) echo "no key id" >&2; exit 64 ;; esac`;
 /// any failure editing the keys file is a bare `exit 70`. A missing keys
-/// file is a failure too (ruling R24): wrapper v2's `grep` exits 2 on it,
+/// file is a failure too, for byte parity with wrapper v2: its `grep` exits 2 on it,
 /// printing GNU grep's message, and the wrapper then exits 70.
 /// Returns the exit code and the outcome the call log records.
 async fn forget(key: Option<&str>, stderr: &mut (impl AsyncWrite + Unpin)) -> (i32, &'static str) {
@@ -285,8 +286,9 @@ async fn run_verb(
             Err(_) => EX_SOFTWARE,
         }
     };
-    // Ruling R9: a TERMed CLI is KILLed and its scratch removed before the
-    // process exits; the slot stays held until then.
+    // A TERMed CLI is KILLed and its scratch removed before the process
+    // exits (else a CLI that ignores TERM outlives it); the slot stays held
+    // until then.
     run::drain_reaps().await;
     (code, logged)
 }

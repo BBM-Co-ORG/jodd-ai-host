@@ -9,7 +9,7 @@
 //! rest (the grace, the KILL, the scratch removal) is a "reap" task that
 //! outlives the call, like wrapper v2's detached `reap`. A process about to
 //! exit must `drain_reaps().await` first, or a CLI that ignores TERM survives
-//! it (ruling R9).
+//! it.
 
 use std::ffi::OsStr;
 use std::fs::{self, File};
@@ -168,7 +168,8 @@ async fn run_in(
 
     let mut cmd = Command::new(&req.cfg.path);
     cmd.args(argv)
-        // Wrapper v2 parity (ruling R11): inherit the server's environment
+        // Wrapper v2 parity (hosts may rely on variables from the account's
+        // shell rc, and a client cannot set any): inherit the server's environment
         // (HOME and the CLIs' own variables among it), override only PATH.
         .env("PATH", &req.cfg.path_env)
         .current_dir(d.join("work"))
@@ -661,7 +662,7 @@ mod tests {
 
     #[tokio::test]
     async fn child_env_is_inherited_with_path_overridden() {
-        // Wrapper v2 parity (ruling R11): the CLI inherits our environment,
+        // Wrapper v2 parity: the CLI inherits our environment,
         // and only PATH is replaced, by the policy's path_env.
         let fx = Fx::new();
         let cli = fx.script("env\n");
@@ -1008,7 +1009,7 @@ mod tests {
         assert!(stderr.contains("bin\u{FFFD}err\n"), "{stderr:?}");
     }
 
-    /// Ruling R9: callers exit right after Cancelled; `drain_reaps` is what
+    /// Callers exit right after Cancelled; `drain_reaps` is what
     /// still KILLs a CLI that ignores TERM, and removes its scratch, first.
     #[tokio::test]
     async fn drain_reaps_kills_stubborn_cli_before_return() {
