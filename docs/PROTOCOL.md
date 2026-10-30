@@ -54,8 +54,9 @@ host) gets the same exit 64. That is how a client tells the two apart.
 The session is [MCP](https://modelcontextprotocol.io) over stdio: JSON-RPC
 2.0, one message per line, UTF-8.
 
-**Handshake.** The first message must be `initialize`. If stdin ends, or the
-first message is something else, the server exits with code 76 and no answer.
+**Handshake.** The first request must be `initialize` (a `ping` before it is
+answered). If stdin ends first, or the first message is something else, the
+server exits with code 76 without an answer.
 
 **Protocol version.** The server answers `initialize` with the client's
 `protocolVersion` when it supports it. In 1.0.0 it supports `2024-11-05`,
