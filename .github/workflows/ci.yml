@@ -1,0 +1,49 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  rust:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --workspace --locked
+
+  shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: shellcheck
+        run: >
+          shellcheck -s sh
+          bin/jodd-ai-host
+          lib/*.sh
+          install/*.sh
+          docker/entrypoint.sh
+          test/*.sh
+          test/e2e/*.sh
+          test/docker/run-tests.sh
+      - name: helper tests
+        run: sh test/helper_test.sh
+      - name: macOS installer tests
+        run: sh test/macos_test.sh
+      # test/e2e/ needs Docker, the network and a checkout of the Jodd app repo
+      # (it runs Jodd's own setup code against the host); it is linted above and
+      # run by hand, never here.

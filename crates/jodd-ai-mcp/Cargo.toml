@@ -1,0 +1,9 @@
+[package]
+name = "jodd-ai-mcp"
+version = "0.1.0"
+edition = "2021"
+description = "MCP server for jodd-ai-host: runs Claude Code and Codex on your own server"
+license = "Apache-2.0"
+repository = "https://github.com/BBM-Co-ORG/jodd-ai-host"
+
+[dependencies]
