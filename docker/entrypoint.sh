@@ -54,14 +54,15 @@ chown jodd-ai:jodd-ai /var/log/jodd-ai-host
 chmod 700 /var/log/jodd-ai-host
 # The home volume can predate this image or be a bind mount: make sure the login
 # shell's PATH covers ~/.local/bin, where the CLIs install.
-if ! grep -qs '\.local/bin' /home/jodd-ai/.profile /home/jodd-ai/.bash_profile 2>/dev/null; then
-  # Written AS THE ACCOUNT, never as root: the account controls its home, and a root append (or
-  # chown) would follow a link it planted, e.g. ~/.profile -> /usr/local/bin/jodd-ai-host. env -i:
-  # su would hand root's environment to the account's child.
-  # shellcheck disable=SC2016  # the $ is for the account's shell
-  env -i PATH=/usr/bin:/bin HOME=/home/jodd-ai su -s /bin/sh jodd-ai -c 'printf "%s\n" '"'"'export PATH="$HOME/.local/bin:$PATH"'"'"' >> /home/jodd-ai/.profile' \
-    || echo "jodd-ai-host: could not add ~/.local/bin to the AI account's ~/.profile (is it a link?). Check: jodd-ai-host doctor" >&2
-fi
+# Checked and written AS THE ACCOUNT, never as root: the account controls its home, so root neither
+# reads its files (a FIFO there, or a link to one, would block root's read before sshd starts) nor
+# appends to them (an append, or a chown, would follow a link it planted, e.g. ~/.profile ->
+# /usr/local/bin/jodd-ai-host). Bounded, like the probes below, since the account's own read can
+# block too. env -i: su would hand root's environment to the account's child.
+# shellcheck disable=SC2016  # the $ is for the account's shell
+timeout -k 5 10 env -i PATH=/usr/bin:/bin HOME=/home/jodd-ai su -s /bin/sh jodd-ai -c \
+  'grep -qs "\.local/bin" /home/jodd-ai/.profile /home/jodd-ai/.bash_profile || printf "%s\n" '"'"'export PATH="$HOME/.local/bin:$PATH"'"'"' >> /home/jodd-ai/.profile' \
+  || echo "jodd-ai-host: could not add ~/.local/bin to the AI account's ~/.profile (is it a link, or not a regular file?). Check: jodd-ai-host doctor" >&2
 
 # Password. Container filesystems are rebuilt on recreate but not on restart, so the rules are:
 #  - never touch a password that is already set, unless JODD_AI_PASSWORD was deliberately changed;
