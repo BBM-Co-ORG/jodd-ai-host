@@ -57,10 +57,11 @@ jobs:
           REF: ${{ github.ref }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
-          set -eu
+          set -eu -o pipefail
+          # A version: the installers' rule (lib/mcp.sh mcp_version_ok), no leading v.
+          semver='[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.+-]+)?'
           version=$(sed -n 's/^version = "\(.*\)"$/\1/p' crates/jodd-ai-mcp/Cargo.toml | head -n 1)
-          # The installers' rule for a version (lib/mcp.sh mcp_version_ok), no leading v.
-          echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.+-]+)?$' \
+          echo "$version" | grep -Eqx "$semver" \
             || { echo "::error::crates/jodd-ai-mcp/Cargo.toml has no usable version ('$version')"; exit 1; }
           case $EVENT in
             push) case $REF in refs/tags/v*) publish=true ;; *) publish=false ;; esac ;;
@@ -72,9 +73,16 @@ jobs:
             exit 1
           fi
           case $version in *-*) prerelease=true ;; *) prerelease=false ;; esac
-          # :latest moves only to the highest stable version, so re-running an older release
-          # cannot take it back. With no stable tag yet (a dry run before 1.0.0), this one would.
-          highest=$(git ls-remote --tags --refs origin 'v*' | sed 's|.*refs/tags/v||' | grep -Ev -- '-' | sort -V | tail -n 1 || :)
+          # :latest (and GitHub's Latest) moves only to the highest stable v<semver> tag, so
+          # re-running an older release cannot take it back. Fails CLOSED: no tag list, no run.
+          # Tags that are not v<semver> (a stray `vnext`) are ignored. With no stable tag yet (a
+          # dry run before 1.0.0), this version would be latest.
+          if ! refs=$(git ls-remote --tags --refs origin 'v*'); then
+            echo "::error::cannot list the tags, so cannot tell whether $version is the latest release"; exit 1
+          fi
+          highest=$(printf '%s\n' "$refs" | sed -n 's|^[0-9a-f]*[[:space:]]*refs/tags/v||p' \
+            | { grep -Ex "$semver" || :; } | { grep -v -- '-' || :; } | sort -V | tail -n 1)
+          echo "highest stable tag: ${highest:-none}"
           latest=false
           if [ "$prerelease" = false ] && { [ -z "$highest" ] || [ "$highest" = "$version" ]; }; then latest=true; fi
           {
@@ -156,11 +164,12 @@ jobs:
           codesign -dv dist/jodd-ai-mcp 2>&1 | grep -E 'Signature|flags' || :
           if [ "$want" = "$(uname -m)" ]; then
             got=$(dist/jodd-ai-mcp --version)
-          elif got=$(arch -x86_64 dist/jodd-ai-mcp --version 2>/dev/null); then
+          elif /usr/bin/arch -x86_64 /usr/bin/true 2>/dev/null; then
+            got=$(arch -x86_64 dist/jodd-ai-mcp --version)
             echo "(ran under Rosetta)"
           else
-            echo "no Rosetta on this runner: the x86_64 binary was checked by lipo and otool only"
-            got="jodd-ai-mcp $VERSION"
+            echo "::warning::no Rosetta on this runner: the x86_64 binary's --version was NOT checked (lipo and otool only)"
+            exit 0
           fi
           echo "$got"
           [ "$got" = "jodd-ai-mcp $VERSION" ]
@@ -363,7 +372,20 @@ jobs:
             echo
             echo "Images: \`ghcr.io/bbm-co-org/jodd-ai-host:$VERSION\`; for client CI, \`ghcr.io/bbm-co-org/jodd-ai-host-test:$VERSION\` (fake CLIs, never for real use)."
           } >> notes.md
-          # GitHub's "Latest" (what the installers resolve, ruling R27) moves with :latest.
-          set -- --verify-tag --title "jodd-ai-host $VERSION" --notes-file notes.md "--latest=$LATEST"
-          if [ "$PRERELEASE" = true ]; then set -- "$@" --prerelease; fi
-          gh release create "v$VERSION" "$@" assets/*
+          tag=v$VERSION
+          # Idempotent: a re-run (after a failure mid-upload, which can leave a draft that
+          # `gh release view` finds) replaces the files and settles the release; it never makes a
+          # second one. GitHub's "Latest" (what the installers resolve, ruling R27) moves with :latest.
+          if gh release view "$tag" --json tagName,isDraft >/dev/null 2>view-err.txt; then
+            echo "$tag exists: replacing its files"
+            gh release upload "$tag" assets/* --clobber
+          elif grep -qi 'release not found' view-err.txt; then
+            # a draft first, so a failed upload leaves something the re-run above finishes
+            gh release create "$tag" --verify-tag --draft --title "jodd-ai-host $VERSION" --notes-file notes.md assets/*
+          else
+            cat view-err.txt >&2; exit 1
+          fi
+          gh release edit "$tag" --verify-tag --title "jodd-ai-host $VERSION" --notes-file notes.md \
+            "--prerelease=$PRERELEASE" "--latest=$LATEST" --draft=false
+          gh release view "$tag" --json tagName,isDraft,isPrerelease,assets \
+            --jq '"\(.tagName) draft=\(.isDraft) prerelease=\(.isPrerelease) assets=\(.assets | length)"'

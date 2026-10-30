@@ -10,10 +10,10 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: mlugg/setup-zig@v2
+    - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
       with:
         version: 0.15.2
-    - uses: taiki-e/install-action@v2
+    - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
       with:
         tool: cargo-zigbuild@0.23.4
     - name: Build both musl targets
