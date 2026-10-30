@@ -1,0 +1,359 @@
+name: Release
+# Builds a release: jodd-ai-mcp for four targets (tarball + .sha256 each, ruling R26), the
+# multi-arch host image and the jodd-ai-host-test image client CI pins (spec §6 rule 2).
+#
+# What gets PUBLISHED is decided once, by the `meta` job's `publish` output, and every push /
+# upload / release step is conditioned on it:
+#   - push of a v* tag            publish (the tag must be v<the crate's version>)
+#   - workflow_dispatch           a DRY RUN, unless dry_run is false AND the run is on a v* tag
+#                                 (a re-run of that release); dry_run=false on a branch fails
+# A dry run builds everything (artifacts: the eight release files) and publishes nothing.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build everything, publish nothing
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  RUST_TOOLCHAIN: 1.96.0
+  IMAGE: ghcr.io/bbm-co-org/jodd-ai-host
+  TEST_IMAGE: ghcr.io/bbm-co-org/jodd-ai-host-test
+
+jobs:
+  meta:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.m.outputs.version }}
+      publish: ${{ steps.m.outputs.publish }}
+      prerelease: ${{ steps.m.outputs.prerelease }}
+      latest: ${{ steps.m.outputs.latest }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: m
+        name: Version, and whether this run publishes
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -eu
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' crates/jodd-ai-mcp/Cargo.toml | head -n 1)
+          # The installers' rule for a version (lib/mcp.sh mcp_version_ok), no leading v.
+          echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.+-]+)?$' \
+            || { echo "::error::crates/jodd-ai-mcp/Cargo.toml has no usable version ('$version')"; exit 1; }
+          case $EVENT in
+            push) publish=true ;;                      # only v* tags trigger a push run
+            workflow_dispatch) [ "$DRY_RUN" = false ] && publish=true || publish=false ;;
+            *) publish=false ;;
+          esac
+          if [ "$publish" = true ] && [ "$REF" != "refs/tags/v$version" ]; then
+            echo "::error::publishing needs the tag v$version (the crate's version, which jodd-ai-mcp --version prints); this run is on $REF. Nothing was built or published."
+            exit 1
+          fi
+          case $version in *-*) prerelease=true ;; *) prerelease=false ;; esac
+          # :latest moves only to the highest stable version, so re-running an older release
+          # cannot take it back. With no stable tag yet (a dry run before 1.0.0), this one would.
+          highest=$(git ls-remote --tags --refs origin 'v*' | sed 's|.*refs/tags/v||' | grep -Ev -- '-' | sort -V | tail -n 1 || :)
+          latest=false
+          if [ "$prerelease" = false ] && { [ -z "$highest" ] || [ "$highest" = "$version" ]; }; then latest=true; fi
+          {
+            echo "version=$version"
+            echo "publish=$publish"
+            echo "prerelease=$prerelease"
+            echo "latest=$latest"
+          } >> "$GITHUB_OUTPUT"
+          echo "version=$version publish=$publish prerelease=$prerelease latest=$latest (event=$EVENT ref=$REF dry_run=${DRY_RUN:-n/a})"
+          if [ "$publish" = true ]; then
+            echo "### Release $version: PUBLISHING" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "DRY RUN: nothing will be pushed, uploaded or released."
+            echo "### Release $version: DRY RUN (publish=false), nothing is pushed or released" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  linux:
+    needs: meta
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/musl
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - name: The x86_64 binary runs and says its version
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          got=$(dist/linux-amd64/jodd-ai-mcp --version)
+          echo "$got"
+          [ "$got" = "jodd-ai-mcp $VERSION" ]
+      - uses: actions/upload-artifact@v6
+        with:
+          name: bin-x86_64-unknown-linux-musl
+          path: dist/linux-amd64/jodd-ai-mcp
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v6
+        with:
+          name: bin-aarch64-unknown-linux-musl
+          path: dist/linux-arm64/jodd-ai-mcp
+          if-no-files-found: error
+          retention-days: 7
+
+  macos:
+    needs: meta
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [aarch64-apple-darwin, x86_64-apple-darwin]
+    # Apple silicon; x86_64 is cross-compiled there (the same SDK has both).
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -eu
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --target "$TARGET"
+          cargo +"$RUST_TOOLCHAIN" build --release --locked -p jodd-ai-mcp --target "$TARGET"
+          mkdir -p dist
+          install -m 0755 "target/$TARGET/release/jodd-ai-mcp" dist/jodd-ai-mcp
+      - name: Check the architecture, the libraries and the version
+        env:
+          TARGET: ${{ matrix.target }}
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          set -eu
+          case $TARGET in aarch64-*) want=arm64 ;; x86_64-*) want=x86_64 ;; esac
+          archs=$(lipo -archs dist/jodd-ai-mcp)
+          echo "architectures: $archs"
+          [ "$archs" = "$want" ]
+          # standalone: only the system's own libraries
+          otool -L dist/jodd-ai-mcp
+          if otool -L dist/jodd-ai-mcp | tail -n +2 | grep -v -E '^[[:space:]]+/(usr/lib|System/Library)/'; then
+            echo "::error::jodd-ai-mcp links a library that is not the system's (above)"; exit 1
+          fi
+          codesign -dv dist/jodd-ai-mcp 2>&1 | grep -E 'Signature|flags' || :
+          if [ "$want" = "$(uname -m)" ]; then
+            got=$(dist/jodd-ai-mcp --version)
+          elif got=$(arch -x86_64 dist/jodd-ai-mcp --version 2>/dev/null); then
+            echo "(ran under Rosetta)"
+          else
+            echo "no Rosetta on this runner: the x86_64 binary was checked by lipo and otool only"
+            got="jodd-ai-mcp $VERSION"
+          fi
+          echo "$got"
+          [ "$got" = "jodd-ai-mcp $VERSION" ]
+      - uses: actions/upload-artifact@v6
+        with:
+          name: bin-${{ matrix.target }}
+          path: dist/jodd-ai-mcp
+          if-no-files-found: error
+          retention-days: 7
+
+  # The release files, made in one place: jodd-ai-mcp-<version>-<target>.tar.gz holding exactly
+  # one file, jodd-ai-mcp (0755), at its root, and <asset>.sha256 as "<64 hex>  <asset name>".
+  package:
+    needs: [meta, linux, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: bin-*
+          path: bin
+      - name: Tarballs and checksums
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          set -eu
+          epoch=$(git log -1 --format=%ct)
+          mkdir assets
+          for t in x86_64-unknown-linux-musl aarch64-unknown-linux-musl aarch64-apple-darwin x86_64-apple-darwin; do
+            a=jodd-ai-mcp-$VERSION-$t.tar.gz
+            d=$(mktemp -d)
+            install -m 0755 "bin/bin-$t/jodd-ai-mcp" "$d/jodd-ai-mcp"
+            tar --sort=name --owner=0 --group=0 --numeric-owner --mtime="@$epoch" -C "$d" -cf - jodd-ai-mcp | gzip -9n > "assets/$a"
+            rm -rf "$d"
+            ( cd assets && sha256sum "$a" > "$a.sha256" )
+          done
+      - name: Check every file against the installers' contract
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          set -eu
+          cd assets
+          ls -l
+          [ "$(ls | wc -l)" -eq 8 ] || { echo "::error::expected 8 release files"; exit 1; }
+          for s in *.sha256; do
+            a=${s%.sha256}
+            grep -Eqx "[0-9a-f]{64}  $a" "$s" || { echo "::error::$s is not '<64 hex>  $a'"; exit 1; }
+            [ "$(wc -l < "$s")" -eq 1 ] || { echo "::error::$s is not one line"; exit 1; }
+            list=$(tar -tvzf "$a"); echo "$a: $list"
+            [ "$(tar -tzf "$a")" = jodd-ai-mcp ] || { echo "::error::$a does not hold exactly jodd-ai-mcp"; exit 1; }
+            printf '%s\n' "$list" | grep -q '^-rwxr-xr-x 0/0 ' || { echo "::error::$a: jodd-ai-mcp is not a 0755 file owned by 0/0"; exit 1; }
+          done
+          sha256sum -c ./*.sha256
+      - name: lib/mcp.sh installs the x86_64 Linux file
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          set -eu
+          dest=$(mktemp -d)
+          # the installers' own download code, served from these files instead of the release
+          sudo env JODD_AI_MCP_VERSION="$VERSION" JODD_AI_MCP_BASE_URL="file://$PWD/assets" DEST="$dest/jodd-ai-mcp" \
+            sh -c '. ./lib/mcp.sh; say() { echo "$*"; }; warn() { echo "$*" >&2; }; mcp_install "$DEST" root'
+          stat -c '%U:%G %a' "$dest/jodd-ai-mcp" | grep -qx 'root:root 755'
+          [ "$("$dest/jodd-ai-mcp" --version)" = "jodd-ai-mcp $VERSION" ]
+      - uses: actions/upload-artifact@v6
+        with:
+          name: jodd-ai-mcp-${{ needs.meta.outputs.version }}
+          path: assets/
+          if-no-files-found: error
+          retention-days: 14
+
+  image:
+    needs: [meta, package]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      VERSION: ${{ needs.meta.outputs.version }}
+      PUBLISH: ${{ needs.meta.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v7
+        with:
+          name: jodd-ai-mcp-${{ needs.meta.outputs.version }}
+          path: assets
+      - name: The released Linux binaries, for the image (MCP_FROM=prebuilt)
+        run: |
+          set -eu
+          ( cd assets && sha256sum -c ./*-unknown-linux-musl.tar.gz.sha256 )
+          for p in amd64:x86_64 arm64:aarch64; do
+            mkdir -p "dist/linux-${p%%:*}"
+            tar -xzf "assets/jodd-ai-mcp-$VERSION-${p#*:}-unknown-linux-musl.tar.gz" -C "dist/linux-${p%%:*}"
+          done
+          file dist/linux-*/jodd-ai-mcp
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - name: The arm64 binary runs (QEMU)
+        run: |
+          got=$(docker run --rm --platform linux/arm64 -v "$PWD/dist/linux-arm64:/d:ro" busybox:1.37 /d/jodd-ai-mcp --version)
+          echo "$got"
+          [ "$got" = "jodd-ai-mcp $VERSION" ]
+      - id: tags
+        name: Image tags
+        env:
+          LATEST: ${{ needs.meta.outputs.latest }}
+        run: |
+          set -eu
+          {
+            echo "host<<EOF"
+            echo "$IMAGE:$VERSION"
+            if [ "$LATEST" = true ]; then echo "$IMAGE:latest"; fi
+            echo "EOF"
+            echo "test=$TEST_IMAGE:$VERSION"
+          } >> "$GITHUB_OUTPUT"
+      - name: Build the test image (amd64) for its smoke test
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: test
+          build-args: MCP_FROM=prebuilt
+          platforms: linux/amd64
+          pull: true
+          load: true
+          push: false
+          provenance: false
+          tags: jodd-ai-host-test:smoke
+      - name: Test image smoke (fakes enabled; MCP initialize, tools/list, infer)
+        run: sh test/test_image_smoke.sh jodd-ai-host-test:smoke
+      - if: needs.meta.outputs.publish == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Host image (amd64 + arm64)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: host
+          build-args: MCP_FROM=prebuilt
+          platforms: linux/amd64,linux/arm64
+          pull: true
+          push: ${{ needs.meta.outputs.publish == 'true' }}
+          provenance: false
+          labels: |
+            org.opencontainers.image.version=${{ needs.meta.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          tags: ${{ steps.tags.outputs.host }}
+      - name: Test image (amd64 + arm64)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: test
+          build-args: MCP_FROM=prebuilt
+          platforms: linux/amd64,linux/arm64
+          push: ${{ needs.meta.outputs.publish == 'true' }}
+          provenance: false
+          labels: |
+            org.opencontainers.image.version=${{ needs.meta.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          tags: ${{ steps.tags.outputs.test }}
+      - name: Summary
+        env:
+          HOST_TAGS: ${{ steps.tags.outputs.host }}
+          TEST_TAG: ${{ steps.tags.outputs.test }}
+        run: |
+          if [ "$PUBLISH" = true ]; then verb="pushed"; else verb="built for linux/amd64 + linux/arm64, NOT pushed (dry run)"; fi
+          echo "images $verb:" $HOST_TAGS "$TEST_TAG" | tee -a "$GITHUB_STEP_SUMMARY"
+
+  release:
+    needs: [meta, package, image]
+    if: needs.meta.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v7
+        with:
+          name: jodd-ai-mcp-${{ needs.meta.outputs.version }}
+          path: assets
+      - name: GitHub release with the eight files
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.meta.outputs.version }}
+          PRERELEASE: ${{ needs.meta.outputs.prerelease }}
+          LATEST: ${{ needs.meta.outputs.latest }}
+        run: |
+          set -eu
+          # This version's CHANGELOG section (## [x.y.z] ... up to the next ## heading).
+          awk -v v="$VERSION" '
+            /^## / { if (on) exit; if (index($0, "[" v "]")) { on = 1; next } }
+            on { print }' CHANGELOG.md > notes.md
+          [ -s notes.md ] || echo "See CHANGELOG.md." > notes.md
+          {
+            echo
+            echo "Images: \`ghcr.io/bbm-co-org/jodd-ai-host:$VERSION\`; for client CI, \`ghcr.io/bbm-co-org/jodd-ai-host-test:$VERSION\` (fake CLIs, never for real use)."
+          } >> notes.md
+          # GitHub's "Latest" (what the installers resolve, ruling R27) moves with :latest.
+          set -- --verify-tag --title "jodd-ai-host $VERSION" --notes-file notes.md "--latest=$LATEST"
+          if [ "$PRERELEASE" = true ]; then set -- "$@" --prerelease; fi
+          gh release create "v$VERSION" "$@" assets/*

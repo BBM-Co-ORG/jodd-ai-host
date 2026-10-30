@@ -3,14 +3,26 @@ on:
   pull_request:
   push:
     branches: [main]
+  schedule:
+    - cron: '17 3 * * 1'        # weekly: rebuild :latest for Debian security updates
   workflow_dispatch:
+    inputs:
+      rebuild_latest:
+        description: Also try the weekly rebuild of :latest (never pushes from a manual run)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # per event, so a push to main never replaces a pending weekly rebuild (or the other way)
+  group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  RUST_TOOLCHAIN: 1.96.0
+  IMAGE: ghcr.io/bbm-co-org/jodd-ai-host
 
 jobs:
   rust:
@@ -58,3 +70,114 @@ jobs:
       # entrypoint's policy, log dir and auto-enable; the container has no network
       - name: image smoke test
         run: sh test/image_smoke.sh
+
+  # Every push to main: the multi-arch image as :edge, after the tests. jodd-ai-mcp is
+  # cross-compiled on the runner (static musl, cargo-zigbuild) and copied in (MCP_FROM=prebuilt),
+  # the same way the release builds it, so no Rust is compiled under QEMU.
+  edge:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [rust, shell, image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/musl
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: host
+          build-args: MCP_FROM=prebuilt
+          platforms: linux/amd64,linux/arm64
+          pull: true
+          push: true
+          provenance: false
+          labels: org.opencontainers.image.revision=${{ github.sha }}
+          tags: ${{ env.IMAGE }}:edge
+
+  # Weekly: :latest again, from the LATEST RELEASE (its tag checked out, its own Linux binaries,
+  # checksums verified), on a freshly pulled Debian with no layer cache - so :latest picks up
+  # security updates and never unreleased code. No release yet: nothing to do. A manual run
+  # (rebuild_latest) builds the same and pushes nothing.
+  latest:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.rebuild_latest)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      PUSH: ${{ github.event_name == 'schedule' && github.ref == 'refs/heads/main' }}
+    steps:
+      - id: rel
+        name: The latest release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          if tag=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName 2>err.txt); then
+            echo "latest release: $tag (push=$PUSH)"
+            echo "tag=$tag" >> "$GITHUB_OUTPUT"
+            echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+          elif grep -qi 'release not found' err.txt; then
+            echo "no release yet: nothing to rebuild" | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            cat err.txt >&2; exit 1
+          fi
+      - if: steps.rel.outputs.tag != ''
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ steps.rel.outputs.tag }}
+      - if: steps.rel.outputs.tag != ''
+        id: bins
+        name: The release's Linux binaries
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.rel.outputs.tag }}
+          VERSION: ${{ steps.rel.outputs.version }}
+        run: |
+          set -eu
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir assets --pattern '*-unknown-linux-musl.tar.gz*'
+          ( cd assets && sha256sum -c ./*.sha256 )
+          for p in amd64:x86_64 arm64:aarch64; do
+            mkdir -p "dist/linux-${p%%:*}"
+            tar -xzf "assets/jodd-ai-mcp-$VERSION-${p#*:}-unknown-linux-musl.tar.gz" -C "dist/linux-${p%%:*}"
+          done
+          file dist/linux-*/jodd-ai-mcp
+          echo "rev=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - if: steps.rel.outputs.tag != ''
+        uses: docker/setup-qemu-action@v4
+      - if: steps.rel.outputs.tag != ''
+        uses: docker/setup-buildx-action@v4
+      - if: steps.rel.outputs.tag != '' && env.PUSH == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - if: steps.rel.outputs.tag != ''
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: host
+          build-args: MCP_FROM=prebuilt
+          platforms: linux/amd64,linux/arm64
+          pull: true
+          no-cache: true
+          push: ${{ env.PUSH == 'true' }}
+          provenance: false
+          labels: |
+            org.opencontainers.image.version=${{ steps.rel.outputs.version }}
+            org.opencontainers.image.revision=${{ steps.bins.outputs.rev }}
+          tags: ${{ env.IMAGE }}:latest

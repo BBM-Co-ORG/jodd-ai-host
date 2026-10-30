@@ -1,0 +1,41 @@
+name: jodd-ai-mcp for Linux (static, musl)
+description: >
+  Cross-compiles jodd-ai-mcp for x86_64 and aarch64 Linux, static (musl), with cargo-zigbuild on
+  the runner (no QEMU), into dist/linux-amd64/jodd-ai-mcp and dist/linux-arm64/jodd-ai-mcp: the
+  paths docker/Dockerfile reads with MCP_FROM=prebuilt. Needs the repository checked out.
+inputs:
+  toolchain:
+    description: The Rust toolchain to build with (an exact version, for a reproducible release).
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: mlugg/setup-zig@v2
+      with:
+        version: 0.15.2
+    - uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-zigbuild@0.23.4
+    - name: Build both musl targets
+      shell: sh
+      env:
+        TOOLCHAIN: ${{ inputs.toolchain }}
+      run: |
+        set -eu
+        rustup toolchain install "$TOOLCHAIN" --profile minimal \
+          --target x86_64-unknown-linux-musl --target aarch64-unknown-linux-musl
+        zig version
+        cargo-zigbuild --version
+        for p in amd64:x86_64 arm64:aarch64; do
+          arch=${p%%:*} target=${p#*:}-unknown-linux-musl
+          cargo +"$TOOLCHAIN" zigbuild --release --locked -p jodd-ai-mcp --target "$target"
+          mkdir -p "dist/linux-$arch"
+          install -m 0755 "target/$target/release/jodd-ai-mcp" "dist/linux-$arch/jodd-ai-mcp"
+        done
+        file dist/linux-amd64/jodd-ai-mcp dist/linux-arm64/jodd-ai-mcp
+        # static: no loader, so they run on any Linux (and in the Debian image)
+        file dist/linux-amd64/jodd-ai-mcp | grep -q 'x86-64'
+        file dist/linux-arm64/jodd-ai-mcp | grep -q 'aarch64'
+        for b in dist/linux-*/jodd-ai-mcp; do
+          file "$b" | grep -Eq 'statically linked|static-pie linked' || { echo "::error::$b is not static"; exit 1; }
+        done

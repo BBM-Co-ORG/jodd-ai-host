@@ -99,10 +99,11 @@ esac
 # cannot keep sshd from starting (timeout kills the whole process group).
 timeout -k 5 20 jodd-ai-host auto-enable \
   || echo "jodd-ai-host: the policy was not updated (failed, or took over 20 s: is ~/.profile or ~/.bashrc of jodd-ai waiting for input?). Check: docker compose exec ai-host jodd-ai-host doctor" >&2
-# CLIs: install on first start, in the background so sshd is up at once; then the same auto-enable.
-# (that login-shell probe is bounded too; a timeout reads as "codex missing", which only starts the
-# background job)
-if [ ! -x /home/jodd-ai/.local/bin/claude ] || ! timeout -k 5 10 su -l jodd-ai -s /bin/sh -c 'command -v codex' >/dev/null 2>&1; then
+# CLIs: install on first start (either one missing from the account's login PATH), in the
+# background so sshd is up at once; then the same auto-enable. CLIs already on that PATH are left
+# alone (the test image's fakes in /usr/local/bin, so it never fetches the real ones). That
+# login-shell probe is bounded too; a timeout reads as "missing", which only starts the job.
+if ! timeout -k 5 10 su -l jodd-ai -s /bin/sh -c 'command -v claude && command -v codex' >/dev/null 2>&1; then
   ( echo "jodd-ai-host: installing claude and codex (first start)…"
     if jodd-ai-host update-clis; then
       echo "jodd-ai-host: CLIs installed. Sign in: docker compose exec ai-host jodd-ai-host signin claude | codex"
