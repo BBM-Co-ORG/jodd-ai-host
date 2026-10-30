@@ -38,8 +38,9 @@ program the host owns, under a policy only the administrator can change.
   else. Re-running an installer upgrades it.
 - The Docker image builds `jodd-ai-mcp` in, and keeps the policy across
   `docker compose pull`.
-- A run that is cancelled, times out or loses its client stops the CLI's whole
-  process group (TERM, KILL 5 s later) and removes its scratch directory.
+- A run that is cancelled, times out or loses its client, or whose server is
+  stopped (TERM, HUP or INT), stops the CLI's whole process group (TERM, KILL
+  5 s later) and removes its scratch directory.
 
 ### Compatibility
 

@@ -204,7 +204,7 @@ async fn run_verb(
     let timeout_secs = cfg.timeout_secs;
     let cancel = CancellationToken::new();
     // `trap 'stop; exit 143' TERM HUP INT`: registered before the CLI starts.
-    let signals = StopSignals::register();
+    let signals = run::StopSignals::register();
     let run_fut = run::run(
         RunRequest {
             def,
@@ -341,42 +341,6 @@ async fn write_out(w: &mut (impl AsyncWrite + Unpin), bytes: &[u8]) -> std::io::
 async fn refuse(stderr: &mut (impl AsyncWrite + Unpin), msg: &str, code: i32) -> i32 {
     let _ = write_out(stderr, msg.as_bytes()).await;
     code
-}
-
-/// TERM, HUP and INT, as wrapper v2 traps them. Registering replaces the
-/// default action for good, so this happens only once a CLI is about to run.
-struct StopSignals([Option<tokio::signal::unix::Signal>; 3]);
-
-impl StopSignals {
-    fn register() -> Self {
-        use tokio::signal::unix::{signal, SignalKind};
-        StopSignals(
-            [
-                SignalKind::terminate(),
-                SignalKind::hangup(),
-                SignalKind::interrupt(),
-            ]
-            .map(|k| signal(k).ok()),
-        )
-    }
-
-    /// Resolves on the first of them; never for one that could not be registered.
-    async fn any(self) {
-        async fn recv(s: Option<tokio::signal::unix::Signal>) {
-            match s {
-                Some(mut s) => {
-                    s.recv().await;
-                }
-                None => std::future::pending().await,
-            }
-        }
-        let [t, h, i] = self.0;
-        tokio::select! {
-            _ = recv(t) => {}
-            _ = recv(h) => {}
-            _ = recv(i) => {}
-        }
-    }
 }
 
 #[cfg(test)]

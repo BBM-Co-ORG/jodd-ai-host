@@ -207,6 +207,8 @@ A run stops when:
 - the client sends `notifications/cancelled` with that request's id;
 - stdin ends (the client went away, or the SSH channel closed). This stops
   every run of the session;
+- the server gets TERM, HUP or INT (a container stop, a `pkill`). This stops
+  every run of the session, and the process exits 143 once they are cleaned up;
 - its time limit is reached (`timeout`).
 
 Stopping means: the CLI's whole process group gets TERM, then KILL 5 seconds

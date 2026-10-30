@@ -368,6 +368,16 @@ impl Raw {
         self.stdin = None;
     }
 
+    /// `kill -<sig>` the server, with its stdin still open.
+    fn signal(&self, sig: &str) {
+        let ok = Command::new("kill")
+            .args([&format!("-{sig}"), &self.child.id().to_string()])
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "kill -{sig} failed");
+    }
+
     fn exited_within(&mut self, within: Duration) -> Option<ExitStatus> {
         let started = Instant::now();
         while started.elapsed() < within {
@@ -821,6 +831,48 @@ fn mcp_stdin_close_mid_infer_kills_cli() {
     let st = s.exited_within(Duration::from_secs(10));
     assert!(st.is_some(), "the server did not exit after stdin closed");
     assert_eq!(std::fs::read_to_string(fx.path("raw.stderr")).unwrap(), "");
+}
+
+/// A stop signal to the server (a container stop, a `pkill`) while the client
+/// is still connected: the CLI's group is stopped, the scratch (it holds the
+/// prompt) removed, and the server exits 143, as the legacy shim does.
+#[test]
+fn a_stop_signal_mid_infer_kills_cli_and_cleans_scratch() {
+    for sig in ["TERM", "HUP", "INT"] {
+        let fx = Fx::both();
+        let pidfile = fx.path("fake.pid");
+        let mut s = Raw::start(
+            &fx,
+            &[
+                ("FAKE_SLEEP", "30"),
+                ("FAKE_PIDFILE", &pidfile.to_string_lossy()),
+            ],
+        );
+        s.call(3, "infer", json!({"harness": "codex", "prompt": "p"}));
+        wait_for_pidfile(&pidfile);
+        s.signal(sig);
+        assert!(
+            fake_is_gone_within(&pidfile, 3),
+            "SIG{sig}: the CLI outlived the server"
+        );
+        assert!(fx.scratch_gone_within(7), "SIG{sig}: scratch left behind");
+        let st = s
+            .exited_within(Duration::from_secs(10))
+            .unwrap_or_else(|| panic!("SIG{sig}: the server did not exit"));
+        assert_eq!(st.code(), Some(143), "SIG{sig}: {st:?}");
+    }
+}
+
+/// With no run in flight a stop signal still ends the session at once.
+#[test]
+fn a_stop_signal_to_an_idle_session_ends_it() {
+    let fx = Fx::both();
+    let mut s = Raw::start(&fx, &[]);
+    s.signal("TERM");
+    let st = s
+        .exited_within(Duration::from_secs(5))
+        .expect("the server ignored TERM");
+    assert_eq!(st.code(), Some(143), "{st:?}");
 }
 
 #[test]

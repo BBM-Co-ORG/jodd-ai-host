@@ -84,6 +84,43 @@ pub async fn drain_reaps() {
     }
 }
 
+/// TERM, HUP and INT, as wrapper v2 traps them. Registering replaces the
+/// default action for good: the legacy shim registers once a CLI is about to
+/// run, the MCP server for its whole session.
+pub(crate) struct StopSignals([Option<tokio::signal::unix::Signal>; 3]);
+
+impl StopSignals {
+    pub(crate) fn register() -> Self {
+        use tokio::signal::unix::{signal, SignalKind};
+        StopSignals(
+            [
+                SignalKind::terminate(),
+                SignalKind::hangup(),
+                SignalKind::interrupt(),
+            ]
+            .map(|k| signal(k).ok()),
+        )
+    }
+
+    /// Resolves on the first of them; never for one that could not be registered.
+    pub(crate) async fn any(self) {
+        async fn recv(s: Option<tokio::signal::unix::Signal>) {
+            match s {
+                Some(mut s) => {
+                    s.recv().await;
+                }
+                None => std::future::pending().await,
+            }
+        }
+        let [t, h, i] = self.0;
+        tokio::select! {
+            _ = recv(t) => {}
+            _ = recv(h) => {}
+            _ = recv(i) => {}
+        }
+    }
+}
+
 static REAPS: Mutex<Vec<JoinHandle<()>>> = Mutex::new(Vec::new());
 
 fn reaps() -> std::sync::MutexGuard<'static, Vec<JoinHandle<()>>> {

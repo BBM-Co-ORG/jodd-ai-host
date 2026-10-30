@@ -16,8 +16,10 @@
 //!
 //! A run is cancelled (its CLI's process group TERMed, KILLed 5 s later, its
 //! scratch removed) by the client's `notifications/cancelled` for that request,
-//! and by stdin closing (the SSH channel going away). Before the process exits
-//! every pending reap is awaited (ruling R9).
+//! by stdin closing (the SSH channel going away), and by TERM, HUP or INT to
+//! the server (a container stop, a `pkill`), which also ends the session with
+//! exit 143 as the legacy shim does. Before the process exits every pending
+//! reap is awaited (ruling R9).
 //!
 //! `tools/list` shows the policy as it was when the session started, but
 //! every `infer` re-reads the policy file and obeys that (ruling R19): an
@@ -47,6 +49,7 @@ use tokio::io::{AsyncRead, ReadBuf};
 use tokio_util::bytes::BytesMut;
 use tokio_util::codec::{Decoder, FramedRead, FramedWrite};
 use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
 
 use crate::harness;
 use crate::policy::{self, HarnessId, HarnessPolicy, LoadOutcome, Policy};
@@ -60,6 +63,10 @@ pub const TOOL_VERSION_KEY: &str = "jodd-ai-host/tool-version";
 const TOOL_VERSION: u64 = 1;
 /// The client never completed an MCP handshake (`EX_PROTOCOL`).
 const EX_PROTOCOL: i32 = 76;
+/// Stopped by TERM, HUP or INT (wrapper v2's `exit 143`).
+const EX_TERM: i32 = 143;
+/// How long a stopping session waits for its in-flight calls to notice.
+const CALLS_STOP_WAIT: Duration = Duration::from_secs(3);
 
 const INFER_ARGS: [&str; 5] = ["harness", "prompt", "system", "schema", "timeout_secs"];
 const DOCTOR: &str = "On the host, run `jodd-ai-host doctor`.";
@@ -74,12 +81,28 @@ pub fn line_cap(max_request_bytes: u64) -> usize {
 
 /// Serve one MCP session on stdin/stdout; returns the process exit code.
 pub async fn serve(key: Option<&str>, policy_path: &Path) -> i32 {
+    // Registered first, for the whole session: from here on these signals no
+    // longer kill the process outright, so they must always end it this way.
+    let signals = run::StopSignals::register();
     let listed = Policy::effective(&policy::load(policy_path));
-    // Cancelled when stdin ends (or a line is over the cap): every run of
-    // this session stops with it.
+    // Cancelled when stdin ends (or a line is over the cap) or a stop signal
+    // arrives: every run of this session stops with it.
     let session = CancellationToken::new();
     // Cancelled by `forget_key`: the server exits once its answer is out.
     let quit = CancellationToken::new();
+    // Cancelled by TERM, HUP or INT, after `session`.
+    let stopped = CancellationToken::new();
+    {
+        let (session, stopped) = (session.clone(), stopped.clone());
+        tokio::spawn(async move {
+            signals.any().await;
+            session.cancel();
+            stopped.cancel();
+        });
+    }
+    // Every `infer` in flight, so the session can wait for each to see the
+    // cancel (and hand its CLI to a reap) before the reaps are drained.
+    let calls = TaskTracker::new();
     let cap = line_cap(listed.max_request_bytes);
     let server = Server {
         key: key.map(str::to_string),
@@ -87,6 +110,7 @@ pub async fn serve(key: Option<&str>, policy_path: &Path) -> i32 {
         listed,
         session: session.clone(),
         quit: quit.clone(),
+        calls: calls.clone(),
     };
     // rmcp's own stdio transport reads with an unbounded `read_until` (its
     // codec's limit applies only to `FramedRead`), so read through
@@ -111,23 +135,38 @@ pub async fn serve(key: Option<&str>, policy_path: &Path) -> i32 {
         tokio::io::stdout(),
         JsonRpcMessageCodec::<TxJsonRpcMessage<RoleServer>>::default(),
     );
-    let code = match server.serve((outgoing, incoming)).await {
-        Ok(service) => {
-            let stop = service.cancellation_token();
-            // rmcp's cancel path still sends every response already made
-            // (forget_key's among them) before it closes stdout.
-            let watcher = tokio::spawn(async move {
-                quit.cancelled().await;
-                stop.cancel();
-            });
-            let _ = service.waiting().await;
-            watcher.abort();
-            0
-        }
-        // stdin closed, or the first message was not `initialize`.
-        Err(_) => EX_PROTOCOL,
+    let code = tokio::select! {
+        served = server.serve((outgoing, incoming)) => match served {
+            Ok(service) => {
+                let stop = service.cancellation_token();
+                // rmcp's cancel path still sends every response already made
+                // (forget_key's among them) before it closes stdout.
+                let on_stop = stopped.clone();
+                let watcher = tokio::spawn(async move {
+                    tokio::select! {
+                        _ = quit.cancelled() => {}
+                        _ = on_stop.cancelled() => {}
+                    }
+                    stop.cancel();
+                });
+                let _ = service.waiting().await;
+                watcher.abort();
+                0
+            }
+            // stdin closed, or the first message was not `initialize`.
+            Err(_) => EX_PROTOCOL,
+        },
+        // A stop signal before the handshake finished: no run has started.
+        _ = stopped.cancelled() => EX_TERM,
+    };
+    let code = if stopped.is_cancelled() {
+        EX_TERM
+    } else {
+        code
     };
     session.cancel();
+    calls.close();
+    let _ = tokio::time::timeout(CALLS_STOP_WAIT, calls.wait()).await;
     run::drain_reaps().await;
     code
 }
@@ -140,6 +179,8 @@ struct Server {
     listed: Policy,
     session: CancellationToken,
     quit: CancellationToken,
+    /// Each `infer` holds a token of this while it runs.
+    calls: TaskTracker,
 }
 
 /// One finished call: what the client gets and what the log says.
@@ -238,6 +279,7 @@ impl ServerHandler for Server {
 
 impl Server {
     async fn infer(&self, args: Option<&JsonObject>, cancelled: &CancellationToken) -> Done {
+        let _in_flight = self.calls.token();
         let a = match parse_infer(args) {
             Ok(a) => a,
             Err(msg) => return Done::invalid(None, msg),

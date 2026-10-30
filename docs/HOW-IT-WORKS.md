@@ -200,7 +200,9 @@ Codex is asked not to save a session file.
 When you cancel an AI action in Jodd (for example **Cancel** in Ask Jodd),
 Jodd ends the request or hangs up the connection. `jodd-ai-mcp` stops the CLI:
 TERM, then KILL 5 seconds later, and the run's folder is deleted. That takes
-**at most about 6 seconds**.
+**at most about 6 seconds**. The same happens to every run in flight when
+`jodd-ai-mcp` itself is stopped (`docker compose down`, a `pkill`, a reboot):
+on TERM, HUP or INT it stops its CLIs and deletes their folders before it exits.
 
 There are three limits:
 
