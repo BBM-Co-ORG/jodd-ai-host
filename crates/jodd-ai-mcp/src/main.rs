@@ -5,6 +5,7 @@
 //! for) when sshd set it, else from the argv after `--key <id>`. `--key` is
 //! read from the fixed argv only, never from the client's words.
 
+mod admin;
 mod harness;
 mod keys;
 mod legacy;
@@ -62,6 +63,8 @@ async fn dispatch(args: Vec<String>) -> i32 {
         },
         _ => (None, &args[..]),
     };
+    // `--key` in argv means the restricted key's forced command.
+    let keyed = args.first().map(String::as_str) == Some("--key");
     let original =
         std::env::var_os("SSH_ORIGINAL_COMMAND").map(|s| s.to_string_lossy().into_owned());
     let forced = original.is_some();
@@ -105,11 +108,9 @@ async fn dispatch(args: Vec<String>) -> i32 {
             run::drain_reaps().await;
             code
         }
-        // Task 7: the admin surface, never through the restricted key.
-        Some("admin") if !forced => {
-            eprintln!("admin: not implemented");
-            1
-        }
+        // The admin surface, never through the restricted key: not under a
+        // forced command (SSH_ORIGINAL_COMMAND) and not with `--key` in argv.
+        Some("admin") if !forced && !keyed => admin::run(&words[1..], &policy_path()),
         _ => unknown(),
     }
 }

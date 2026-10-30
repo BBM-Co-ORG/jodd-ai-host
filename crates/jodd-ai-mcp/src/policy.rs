@@ -37,7 +37,6 @@ impl HarnessId {
         }
     }
 
-    #[allow(dead_code)] // the admin surface (Task 7) writes it into new policies
     pub fn default_timeout(&self) -> u64 {
         match self {
             HarnessId::Claude => 120,
@@ -110,7 +109,6 @@ pub fn load(path: &Path) -> LoadOutcome {
 }
 
 /// Follow a chain of symlinks at the final path component (the target may not exist yet).
-#[allow(dead_code)] // used by save_atomic
 fn resolve_write_target(path: &Path) -> io::Result<std::path::PathBuf> {
     let mut cur = path.to_path_buf();
     for _ in 0..40 {
@@ -154,7 +152,6 @@ impl Policy {
     }
 
     /// Write via a same-directory temp file, fsync, mode 0644, rename over `path`.
-    #[allow(dead_code)] // the admin surface (Task 7) saves the policy
     pub fn save_atomic(&self, path: &Path) -> io::Result<()> {
         let text = toml::to_string_pretty(self)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;

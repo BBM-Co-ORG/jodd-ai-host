@@ -823,26 +823,60 @@ fn third_concurrent_legacy_run_is_busy() {
 
 #[test]
 fn forget_logs_one_metadata_line() {
-    // Ruling R21: one line per forget, as for MCP's forget_key. The keys
-    // stub (Task 7 implements) finds nothing to remove.
+    // Ruling R21: one line per forget, as for MCP's forget_key.
     let fx = Fx::new(false);
+    let ssh = fx.path("home/.ssh");
+    std::fs::create_dir(&ssh).unwrap();
+    let keys = ssh.join("authorized_keys");
+    let other = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOtherOtherOther me@laptop";
+    let line = format!(
+        "restrict,command=\"{}/.jodd/ai-run-v2 --key 3f2a9b1c\" ssh-ed25519 \
+         AAAAC3NzaC1lZDI1NTE5AAAAIDummyDummyDummyDummyDummyDummyDummyDu jodd-ai-3f2a9b1c",
+        fx.path("home").display()
+    );
+    std::fs::write(&keys, format!("{other}\n{line}\n")).unwrap();
+
+    // removed: exit 0, silent, the line is gone and the other kept.
+    let (code, out, err) = forced(&fx, Some("3f2a9b1c"), "jodd-ai-run 2 forget", b"");
+    assert_eq!((code, out.as_str(), err.as_str()), (0, "", ""));
+    assert_eq!(
+        std::fs::read_to_string(&keys).unwrap(),
+        format!("{other}\n")
+    );
+    // not_found
     let (code, _, _) = forced(&fx, Some("3f2a9b1c"), "jodd-ai-run 2 forget", b"");
     assert_eq!(code, 0);
+    // no_key
     let (code, _, _) = forced(&fx, None, "jodd-ai-run 2 forget", b"");
     assert_eq!(code, 64);
+    // error: a symlinked keys file is refused with wrapper v2's bare exit 70,
+    // and its target is untouched.
+    let target = fx.path("elsewhere");
+    std::fs::write(&target, format!("{line}\n")).unwrap();
+    std::fs::remove_file(&keys).unwrap();
+    std::os::unix::fs::symlink(&target, &keys).unwrap();
+    let (code, out, err) = forced(&fx, Some("3f2a9b1c"), "jodd-ai-run 2 forget", b"");
+    assert_eq!((code, out.as_str(), err.as_str()), (70, "", ""));
+    assert_eq!(
+        std::fs::read_to_string(&target).unwrap(),
+        format!("{line}\n")
+    );
+
     let log = std::fs::read_to_string(fx.path("calls.log")).unwrap();
     let lines: Vec<_> = log.lines().collect();
-    assert_eq!(lines.len(), 2, "{log}");
+    assert_eq!(lines.len(), 4, "{log}");
     assert!(
         lines[0].contains(" key=3f2a9b1c tool=jodd-ai-run-forget harness=- "),
         "{log}"
     );
-    assert!(lines[0].ends_with(" outcome=not_found"), "{log}");
+    assert!(lines[0].ends_with(" outcome=removed"), "{log}");
+    assert!(lines[1].ends_with(" outcome=not_found"), "{log}");
     assert!(
-        lines[1].contains(" key=- tool=jodd-ai-run-forget "),
+        lines[2].contains(" key=- tool=jodd-ai-run-forget "),
         "{log}"
     );
-    assert!(lines[1].ends_with(" outcome=no_key"), "{log}");
+    assert!(lines[2].ends_with(" outcome=no_key"), "{log}");
+    assert!(lines[3].ends_with(" outcome=error"), "{log}");
 }
 
 #[test]
@@ -901,8 +935,11 @@ fn a_term_to_the_shim_mid_run_stops_the_cli() {
 #[test]
 fn admin_is_only_for_a_shell_without_a_forced_command() {
     let fx = Fx::new(false);
+    // Without one, `admin` is reached (an unknown sub-command is a usage error;
+    // tests/admin.rs covers the rest).
     let (code, _, err) = run(&fx, &["admin".into(), "keys".into()], &[], b"");
-    assert_eq!((code, err.as_str()), (1, "admin: not implemented\n"));
+    assert_eq!(code, 2, "{err}");
+    assert!(err.starts_with("usage: jodd-ai-mcp admin"), "{err}");
     let (code, _, err) = forced(&fx, None, "admin keys", b"");
     assert_eq!((code, err.as_str()), (64, "unknown request\n"));
 }

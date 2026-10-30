@@ -946,10 +946,26 @@ async fn until_not_busy(c: &Client, p: &Value) -> CallToolResult {
 // ------------------------------------------------------------- forget_key
 
 #[test]
-fn forget_key_responds_and_exits() {
-    // Ruling R15: keys::forget is a stub until Task 7, which adds the removal
-    // assertion under the plan's name.
+fn forget_key_removes_only_its_line_and_exits() {
     let fx = Fx::empty(); // never subject to policy
+                          // Three lines: another device's (legacy shape), this key's, and an
+                          // unrelated key with no final newline. Only this key's line goes.
+    let ssh = fx.path("home/.ssh");
+    std::fs::create_dir(&ssh).unwrap();
+    let keys = ssh.join("authorized_keys");
+    let home = fx.path("home");
+    let other_device = format!(
+        "restrict,command=\"{}/.jodd/ai-run-v2 --key 11111111\" ssh-ed25519 \
+         AAAAC3NzaC1lZDI1NTE5AAAAIDummyDummyDummyDummyDummyDummyDummyDu jodd-ai-11111111",
+        home.display()
+    );
+    let this_key = format!(
+        "restrict,command=\"/usr/local/bin/jodd-ai-mcp --key {KEY}\" ssh-ed25519 \
+         AAAAC3NzaC1lZDI1NTE5AAAAIPhonePhonePhonePhone jodd-ai-{KEY}"
+    );
+    let unrelated = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOtherOtherOther me@laptop";
+    std::fs::write(&keys, format!("{other_device}\n{this_key}\n{unrelated}")).unwrap();
+
     let mut s = Raw::start(&fx, &[]);
     s.send(json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}));
     let r = s.response(1, QUICK).unwrap();
@@ -965,10 +981,15 @@ fn forget_key_responds_and_exits() {
     let r = s.response(2, QUICK).expect("no forget_key response");
     assert_eq!(
         r["result"]["structuredContent"],
-        json!({"removed": false}),
+        json!({"removed": true}),
         "{r}"
     );
     assert_ne!(r["result"]["isError"], json!(true), "{r}");
+    assert_eq!(
+        std::fs::read_to_string(&keys).unwrap(),
+        format!("{other_device}\n{unrelated}"),
+        "only this key's line is removed; the rest is byte-identical"
+    );
     // Exits on its own, though the client keeps stdin open.
     let st = s.exited_within(Duration::from_secs(10));
     assert!(st.is_some(), "the server did not exit after forget_key");
@@ -977,6 +998,22 @@ fn forget_key_responds_and_exits() {
     let log = fx.log_lines();
     assert_eq!(log.len(), 1, "{log:?}");
     assert!(log[0].contains("tool=forget_key"), "{log:?}");
+    assert!(log[0].ends_with(" outcome=removed"), "{log:?}");
+
+    // Again: the line is gone, so nothing is removed.
+    let mut s = Raw::start(&fx, &[]);
+    s.call(1, "forget_key", json!({}));
+    let r = s.response(1, QUICK).expect("no forget_key response");
+    assert_eq!(
+        r["result"]["structuredContent"],
+        json!({"removed": false}),
+        "{r}"
+    );
+    assert!(s.exited_within(Duration::from_secs(10)).is_some());
+    assert_eq!(
+        std::fs::read_to_string(&keys).unwrap(),
+        format!("{other_device}\n{unrelated}")
+    );
 }
 
 // -------------------------------------------------------------------- log
