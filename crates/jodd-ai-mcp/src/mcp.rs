@@ -560,7 +560,7 @@ fn infer_tool(enabled: &[HarnessId]) -> Tool {
             },
             "schema": {
                 "type": "object",
-                "description": "Optional JSON Schema for the harness's structured-output mode."
+                "description": "Optional JSON Schema for the harness's structured-output mode. Used by Codex; Claude Code ignores it (it still counts toward max_request_bytes)."
             },
             "timeout_secs": {
                 "type": "integer",

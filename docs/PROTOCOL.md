@@ -120,7 +120,7 @@ enabled harnesses; here both):
     },
     "schema": {
       "type": "object",
-      "description": "Optional JSON Schema for the harness's structured-output mode."
+      "description": "Optional JSON Schema for the harness's structured-output mode. Used by Codex; Claude Code ignores it (it still counts toward max_request_bytes)."
     },
     "timeout_secs": {
       "type": "integer",
@@ -147,6 +147,8 @@ The rules:
   hold a stale list.
 - With `system`, the CLI gets `{system}\n\n---\n\n{prompt}` on stdin.
   Without it, the CLI gets the prompt.
+- `schema` is handed to Codex (`--output-schema`). Claude Code ignores it,
+  but it still counts toward `max_request_bytes`.
 - The size checked against `max_request_bytes` (default 8 MiB) is that stdin
   text plus the schema's JSON text, in bytes.
 - The host owns each CLI's command line, how the answer is extracted (Claude
@@ -261,8 +263,8 @@ This exists so that Jodd releases from before the MCP client keep working
 against this server. It is not for new clients.
 
 **Scope.** It does what wrapper v2 (Jodd's `src-tauri/src/llm/remote/wrapper.rs`
-at commit `d514d03d`) does, byte for byte: the same stdout, exit codes and
-messages. The differences:
+at commit `d514d03d`) does, byte for byte for UTF-8 output: the same stdout,
+exit codes and messages. The differences:
 
 - Only enabled harnesses run. `status` reports `path=-` for a harness that is
   disabled or not installed; old Jodd shows it as not installed. `run` for it
@@ -270,6 +272,8 @@ messages. The differences:
 - A full house gets exit 70 with `the AI host is busy` at once.
 - A prompt over `max_request_bytes` gets exit 64 with `unknown request`.
 - On a timeout, CLI stderr written after the TERM is not included.
+- CLI output that is not valid UTF-8 is passed on with each invalid sequence
+  replaced by U+FFFD, where wrapper v2 passed the raw bytes.
 - Each `run` and `forget` writes one log line, like an MCP call.
 
 **Request:** `jodd-ai-run <version> <verb> [preset]`. Words after the fourth
