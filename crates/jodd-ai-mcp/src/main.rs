@@ -1,6 +1,8 @@
 //! jodd-ai-mcp: the MCP server half of jodd-ai-host. Skeleton only; later tasks add the protocol.
 
 #[allow(dead_code)]
+mod harness;
+#[allow(dead_code)]
 mod policy;
 
 use std::process::ExitCode;

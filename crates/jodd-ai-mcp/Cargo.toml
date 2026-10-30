@@ -10,3 +10,4 @@ repository = "https://github.com/BBM-Co-ORG/jodd-ai-host"
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 tempfile = "3"
+serde_json = "1"
