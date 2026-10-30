@@ -35,6 +35,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --workspace --locked
+      # the tests run debug builds, which honour the JODD_AI_MCP_* overrides; a release build
+      # must ignore them, or the AI account could aim the root-installed server at its own policy
+      - name: a release build ignores the test overrides
+        run: |
+          cargo build --release --locked
+          sh test/release_overrides.sh target/release/jodd-ai-mcp target/debug/jodd-ai-mcp
 
   shell:
     runs-on: ubuntu-latest
