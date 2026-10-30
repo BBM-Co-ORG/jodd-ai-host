@@ -58,9 +58,8 @@ jobs:
         run: sh test/helper_test.sh
       - name: macOS installer tests
         run: sh test/macos_test.sh
-      # test/e2e/ needs Docker, the network and a checkout of the Jodd app repo
-      # (it runs Jodd's own setup code against the host); it is linted above and
-      # run by hand, never here.
+      # test/e2e/image.sh runs in the e2e job below; test/e2e/linux.sh (the installer on four
+      # distributions, with the real CLIs downloaded) is linted here and run by hand.
 
   image:
     runs-on: ubuntu-latest
@@ -71,12 +70,24 @@ jobs:
       - name: image smoke test
         run: sh test/image_smoke.sh
 
+  # End to end over real OpenSSH: builds the host image and jodd-ai-host-test from this checkout
+  # and drives them as a client does - MCP over `ssh … jodd-ai-mcp` (test/e2e/mcp_client.py), the
+  # legacy `jodd-ai-run 2 …` with plain ssh, adopt-keys, the restricted key, cancel by hangup,
+  # the policy across a recreate - then the image's lifecycle (lock, recreate, passwords).
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: e2e over real sshd
+        run: sh test/e2e/image.sh
+
   # Every push to main: the multi-arch image as :edge, after the tests. jodd-ai-mcp is
   # cross-compiled on the runner (static musl, cargo-zigbuild) and copied in (MCP_FROM=prebuilt),
   # the same way the release builds it, so no Rust is compiled under QEMU.
   edge:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [rust, shell, image]
+    needs: [rust, shell, image, e2e]
     runs-on: ubuntu-latest
     permissions:
       contents: read

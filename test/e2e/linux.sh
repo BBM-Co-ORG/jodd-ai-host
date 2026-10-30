@@ -1,8 +1,14 @@
 #!/bin/sh
-# Runs install/linux.sh in clean containers, then checks the result with
-# Jodd's real setup code. Local only; needs Docker and network (packages and the
-# official CLI installers are downloaded for real).
+# Runs install/linux.sh in clean containers, then checks the result as a client does (a password
+# login, a restricted key reaching jodd-ai-mcp, legacy status and MCP tools/list: lib.sh's
+# e2e_client_checks). Local only, NOT run in CI: it needs Docker and network (packages and the
+# official CLI installers are downloaded for real), and takes long per image.
 # Usage: test/e2e/linux.sh [image ...]   (default: the four below)
+#
+# jodd-ai-mcp comes from this checkout, not from a release: it is compiled here (the Dockerfile's
+# static musl stage, for this Docker's architecture), packed as a release asset with its .sha256
+# in a temporary directory, and handed to the installer through its test knobs
+# JODD_AI_MCP_BASE_URL=file:///rel and JODD_AI_MCP_VERSION (the crate's version).
 #
 # Per image, three containers (a fourth on ubuntu:24.04):
 #   hardened  a server that already says `PasswordAuthentication no` globally and has an
@@ -26,8 +32,27 @@ set -eu
 images=${*:-ubuntu:24.04 debian:12 fedora:latest alpine:latest}
 port=2225 pw=e2e-linux-pw
 name=
+rel=$(mktemp -d)
 cleanup() { [ -z "$name" ] || docker rm -f "$name" >/dev/null 2>&1 || :; }
-trap cleanup EXIT
+trap 'cleanup; rm -rf "$rel"; e2e_keys_cleanup' EXIT
+
+# The release the installer downloads: this checkout's jodd-ai-mcp, static.
+ver=$(sed -n 's/^version = "\(.*\)"/\1/p' "$repo/crates/jodd-ai-mcp/Cargo.toml" | head -n 1)
+docker build -q --target mcp-source -t jodd-ai-mcp:e2e-linux -f "$repo/docker/Dockerfile" "$repo" >/dev/null
+case $(docker run --rm --entrypoint uname jodd-ai-mcp:e2e-linux -m) in
+  x86_64) tgt=x86_64-unknown-linux-musl ;;
+  aarch64) tgt=aarch64-unknown-linux-musl ;;
+  *) echo "FAIL: no jodd-ai-mcp target for this Docker's architecture"; exit 1 ;;
+esac
+mkdir "$rel/x"
+cid=$(docker create jodd-ai-mcp:e2e-linux)
+docker cp "$cid:/out/jodd-ai-mcp" "$rel/x/jodd-ai-mcp" >/dev/null; docker rm "$cid" >/dev/null
+asset=jodd-ai-mcp-$ver-$tgt.tar.gz
+( cd "$rel/x" && tar -czf "$rel/$asset" jodd-ai-mcp )
+if command -v sha256sum >/dev/null 2>&1; then sum=$(sha256sum "$rel/$asset"); else sum=$(shasum -a 256 "$rel/$asset"); fi
+printf '%s  %s\n' "${sum%% *}" "$asset" > "$rel/$asset.sha256"
+rm -rf "$rel/x"
+echo "release for the installer: $asset (jodd-ai-mcp $ver)"
 
 fail() { echo "FAIL [$img/$scenario]: $*"; exit 1; }
 start() { # $1 scenario
@@ -35,11 +60,12 @@ start() { # $1 scenario
   cleanup
   name="jodd-ai-e2e-$(echo "$img" | tr ':/.' '---')-$scenario"
   docker rm -f "$name" >/dev/null 2>&1 || :
-  docker run -d --name "$name" --init -p "127.0.0.1:$port:22" -v "$repo:/kit:ro" "$img" sleep infinity >/dev/null
+  docker run -d --name "$name" --init -p "127.0.0.1:$port:22" -v "$repo:/kit:ro" -v "$rel:/rel:ro" "$img" sleep infinity >/dev/null
 }
 x() { docker exec "$name" sh -c "$1"; }
 install() { # extra docker-exec args first, e.g. -e JODD_AI_SKIP_CLIS=1
-  docker exec -e JODD_AI_START_SSHD=1 "$@" "$name" sh /kit/install/linux.sh
+  docker exec -e JODD_AI_START_SSHD=1 -e JODD_AI_MCP_BASE_URL=file:///rel -e JODD_AI_MCP_VERSION="$ver" \
+    "$@" "$name" sh /kit/install/linux.sh
 }
 # OpenSSH preinstalled, as on a server that already runs sshd.
 prep_sshd() {
@@ -52,17 +78,8 @@ prep_sshd() {
 # admin's Match above the Include they would make sshd reject the seed config before the
 # installer ran. Empty them: the scenarios simulate a hand-written config.
 empty_dropins() { x 'mkdir -p /etc/ssh/sshd_config.d; for f in /etc/ssh/sshd_config.d/*.conf; do [ -f "$f" ] && : > "$f"; done; :'; }
-# A real password login from the host, through the ssh client's askpass. Succeeds only if
-# the server accepted the password. The password goes by environment, not argv.
-ssh_pw() { # $1 user $2 password
-  ap=$(mktemp); printf '#!/bin/sh\nprintf "%%s\\n" "$E2E_PW"\n' > "$ap"; chmod 700 "$ap"
-  rc=0
-  E2E_PW=$2 SSH_ASKPASS=$ap SSH_ASKPASS_REQUIRE=force DISPLAY=none ssh -o PubkeyAuthentication=no \
-    -o PreferredAuthentications=password,keyboard-interactive -o NumberOfPasswordPrompts=1 \
-    -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10 \
-    -p "$port" "$1@127.0.0.1" true </dev/null >/dev/null 2>&1 || rc=$?
-  rm -f "$ap"; return $rc
-}
+# A real password login from the host (lib.sh); succeeds only if the server accepted the password.
+ssh_pw() { e2e_ssh_pw "$port" "$1" "$2"; } # $1 user $2 password
 # sshd_config and everything in sshd_config.d: names, modes, owners, content. (Not the rest
 # of /etc/ssh: the installer's package step may add the ssh client's files there.)
 snap() {
@@ -104,7 +121,8 @@ for img in $images; do
     printf '%s\n' "$st" | grep -Eq "^$c: +/[^ ]+ \([^)]+\)" || fail "status shows no version for $c: the helper's own login shell does not find it"
   done
   sum1=$(snap)
-  e2e_run_jodd_tests "$port" "$name" "$pw" || fail "Jodd's setup tests failed"
+  e2e_client_checks "$name" "$port" "$pw" e2e0000c || fail "client checks failed"
+  x 'jodd-ai-mcp --version' | grep -qx "jodd-ai-mcp $ver" || fail "the installed jodd-ai-mcp is not $ver"
 
   # idempotent: a second run changes no sshd config, and not the password
   sh1=$(shadow)
