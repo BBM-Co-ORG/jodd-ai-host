@@ -28,6 +28,7 @@ pub enum Answer {
 
 #[derive(Debug)]
 pub struct HarnessDef {
+    #[allow(dead_code)] // pins each def to its id in the tests
     pub id: HarnessId,
     pub args: &'static [Arg],
     pub schema_args: &'static [Arg],

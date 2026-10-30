@@ -5,13 +5,12 @@
 //! for) when sshd set it, else from the argv after `--key <id>`. `--key` is
 //! read from the fixed argv only, never from the client's words.
 
-#[allow(dead_code)]
 mod harness;
 mod keys;
 mod legacy;
-#[allow(dead_code)]
+mod log;
+mod mcp;
 mod policy;
-#[allow(dead_code)]
 mod run;
 mod slots;
 
@@ -97,8 +96,15 @@ async fn dispatch(args: Vec<String>) -> i32 {
             run::drain_reaps().await;
             code
         }
-        // Task 6: the MCP server.
-        Some("jodd-ai-mcp") => unknown(),
+        // Exactly the one word: a request this server does not know (a
+        // future client's extra word) must fail loudly, not be served as
+        // something else.
+        Some("jodd-ai-mcp") if words.len() == 1 => {
+            let code = mcp::serve(key, policy::load(&policy_path())).await;
+            // Ruling R9 (serve drains too; this covers any path that did not).
+            run::drain_reaps().await;
+            code
+        }
         // Task 7: the admin surface, never through the restricted key.
         Some("admin") if !forced => {
             eprintln!("admin: not implemented");

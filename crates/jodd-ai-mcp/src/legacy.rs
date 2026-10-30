@@ -8,7 +8,7 @@
 //! length in bytes, then exactly that many bytes. Jodd never closes stdin;
 //! sshd closes it when Jodd goes away, so EOF after the prompt is the cancel.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use base64::Engine as _;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
@@ -71,7 +71,23 @@ pub async fn serve(
         // `status` and `forget` answer any version (they come before the check).
         "status" => status(policy, &mut stdout).await,
         "forget" => forget(key, &mut stderr).await,
-        "run" => run_verb(req, policy, slots, stdin, &mut stdout, &mut stderr).await,
+        "run" => {
+            // One metadata line per run (ruling R16), as for an MCP call.
+            let started = Instant::now();
+            let mut harness = None;
+            let (code, outcome) = run_verb(
+                req,
+                policy,
+                slots,
+                stdin,
+                &mut stdout,
+                &mut stderr,
+                &mut harness,
+            )
+            .await;
+            crate::log::call(key, "jodd-ai-run", harness, started.elapsed(), outcome);
+            code
+        }
         _ => refuse(&mut stderr, UNKNOWN, EX_USAGE).await,
     }
 }
@@ -122,35 +138,32 @@ async fn run_verb(
     stdin: impl AsyncRead + Unpin,
     stdout: &mut (impl AsyncWrite + Unpin),
     stderr: &mut (impl AsyncWrite + Unpin),
-) -> i32 {
+    harness: &mut Option<HarnessId>,
+) -> (i32, &'static str) {
     if req.version != VERSION {
         let msg = format!(
             "version mismatch: this server has {VERSION}, Jodd sent {}\n",
             req.version
         );
-        return refuse(stderr, &msg, EX_VERSION).await;
+        return (refuse(stderr, &msg, EX_VERSION).await, "version_mismatch");
     }
     // Refuse before reading stdin: Jodd never closes it, so a refusal that
     // waited for the prompt would hang until Jodd's deadline.
-    let Some((id, cfg)) = req
-        .preset
-        .as_deref()
-        .and_then(harness_id)
-        .and_then(|id| policy.enabled(id).map(|cfg| (id, cfg)))
-    else {
-        return refuse(stderr, UNKNOWN, EX_USAGE).await;
+    *harness = req.preset.as_deref().and_then(HarnessId::from_name);
+    let Some((id, cfg)) = harness.and_then(|id| policy.enabled(id).map(|cfg| (id, cfg))) else {
+        return (refuse(stderr, UNKNOWN, EX_USAGE).await, "not_enabled");
     };
 
     let mut stdin = BufReader::new(stdin);
     let (schema_line, n) = match read_header(&mut stdin, policy.max_request_bytes).await {
         Some(h) => h,
-        None => return refuse(stderr, UNKNOWN, EX_USAGE).await,
+        None => return (refuse(stderr, UNKNOWN, EX_USAGE).await, "bad_request"),
     };
     let mut prompt = Vec::with_capacity(n.min(1 << 20) as usize);
     let read = (&mut stdin).take(n).read_to_end(&mut prompt).await;
     if read.is_err() || prompt.len() as u64 != n {
         let msg = "the prompt was incomplete: Jodd went away during the upload\n";
-        return refuse(stderr, msg, EX_SOFTWARE).await;
+        return (refuse(stderr, msg, EX_SOFTWARE).await, "incomplete");
     }
     // `printf '%s' "$schema_line" | $b64d > "$d/schema" || exit 70`
     let schema = if schema_line == b"-" {
@@ -162,14 +175,14 @@ async fn run_verb(
             .and_then(|b| String::from_utf8(b).ok());
         match decoded {
             Some(s) => Some(s),
-            None => return EX_SOFTWARE,
+            None => return (EX_SOFTWARE, "bad_request"),
         }
     };
     // Only now, with the whole prompt in hand: an upload that stalls (a phone
     // losing signal; sshd may not notice for hours) must hold no slot, or two
     // stalls lock every run out. Wrapper v2 held nothing during the upload.
     let Some(_slot) = slots.try_acquire() else {
-        return refuse(stderr, BUSY, EX_SOFTWARE).await;
+        return (refuse(stderr, BUSY, EX_SOFTWARE).await, "busy");
     };
 
     let def = harness::def(id);
@@ -204,6 +217,15 @@ async fn run_verb(
         }
     };
 
+    let logged = match &outcome {
+        _ if stopped => "cancelled",
+        Ok(RunOutcome::Missing) => "cli_missing",
+        Ok(RunOutcome::TimedOut { .. }) => "timeout",
+        Ok(RunOutcome::Exited { code: 0, .. }) => "ok",
+        Ok(RunOutcome::Exited { .. }) => "cli_failed",
+        Ok(RunOutcome::Cancelled) => "cancelled",
+        Err(_) => "error",
+    };
     let code = if stopped {
         // The trap prints nothing; nobody is reading.
         EX_TERM
@@ -251,11 +273,7 @@ async fn run_verb(
     // Ruling R9: a TERMed CLI is KILLed and its scratch removed before the
     // process exits; the slot stays held until then.
     run::drain_reaps().await;
-    code
-}
-
-fn harness_id(preset: &str) -> Option<HarnessId> {
-    HarnessId::all().into_iter().find(|h| h.as_str() == preset)
+    (code, logged)
 }
 
 /// `IFS= read -r schema_line && IFS= read -r n || n=`, then

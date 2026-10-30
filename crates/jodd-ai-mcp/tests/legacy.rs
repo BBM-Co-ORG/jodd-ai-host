@@ -4,9 +4,10 @@
 //! and every message and exit code is the wrapper's.
 //!
 //! Every test runs the binary with HOME, the policy (`JODD_AI_MCP_POLICY`),
-//! the slots dir (`JODD_AI_MCP_SLOTS_DIR`) and TMPDIR inside its own temp dir,
-//! so no test touches the real ~/.ssh, /etc or /run, and parallel tests never
-//! share a slot or count each other's scratch dirs.
+//! the slots dir (`JODD_AI_MCP_SLOTS_DIR`), the call log
+//! (`JODD_AI_MCP_LOG_FILE`) and TMPDIR inside its own temp dir, so no test
+//! touches the real ~/.ssh, /etc, /run or /var/log (or syslog), and parallel
+//! tests never share a slot or count each other's scratch dirs.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -131,6 +132,7 @@ fn spawn(fx: &Fx, args: &[String], env: &[(&str, &str)]) -> Child {
         .env("HOME", fx.path("home"))
         .env("JODD_AI_MCP_POLICY", fx.policy())
         .env("JODD_AI_MCP_SLOTS_DIR", fx.path("slots"))
+        .env("JODD_AI_MCP_LOG_FILE", fx.path("calls.log"))
         .env("TMPDIR", fx.path("tmp"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -278,6 +280,44 @@ fn run_passes_the_prompt_through_byte_for_byte() {
     );
     assert_eq!(err, "codex stderr line\n", "the CLI's stderr only");
     assert_eq!(fx.leftover_scratch(), 0);
+}
+
+#[test]
+fn each_run_logs_one_metadata_line_without_text() {
+    // Ruling R16: one line per legacy run, as for an MCP call; never the
+    // prompt or the answer. `status` is not a run and logs nothing.
+    let fx = Fx::new(false);
+    let secret = "SECRET-PROMPT-51ab";
+    let (code, out, _) = forced(
+        &fx,
+        Some("abcd1234"),
+        "jodd-ai-run 2 run codex",
+        &v2("-", secret),
+    );
+    assert_eq!(code, 0);
+    let (code, _, _) = forced(
+        &fx,
+        Some("abcd1234"),
+        "jodd-ai-run 2 run claude",
+        &v2("-", secret),
+    );
+    assert_eq!(code, 64);
+    let (code, _, _) = run(&fx, &req("status", ""), &[], b"");
+    assert_eq!(code, 0);
+    let log = std::fs::read_to_string(fx.path("calls.log")).unwrap();
+    let lines: Vec<_> = log.lines().collect();
+    assert_eq!(lines.len(), 2, "{log}");
+    assert!(
+        !log.contains(secret) && !log.contains(&out) && !log.contains("PROMPT<"),
+        "{log}"
+    );
+    assert!(
+        lines[0].contains(" key=abcd1234 tool=jodd-ai-run harness=codex dur_ms="),
+        "{log}"
+    );
+    assert!(lines[0].ends_with(" outcome=ok"), "{log}");
+    assert!(lines[1].contains(" harness=claude "), "{log}");
+    assert!(lines[1].ends_with(" outcome=not_enabled"), "{log}");
 }
 
 #[test]
