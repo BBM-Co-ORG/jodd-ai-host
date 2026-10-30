@@ -89,9 +89,36 @@ pub fn load(path: &Path) -> LoadOutcome {
         Err(e) => return LoadOutcome::Invalid(format!("cannot read {}: {e}", path.display())),
     };
     match toml::from_str::<Policy>(&text) {
-        Ok(p) => LoadOutcome::Loaded(p),
+        Ok(p) => {
+            // A zero timeout is ambiguous (instant kill? no limit?), so refuse it.
+            if let Some((h, _)) = p.harness.iter().find(|(_, hp)| hp.timeout_secs == 0) {
+                return LoadOutcome::Invalid(format!(
+                    "harness.{}.timeout_secs must be greater than 0",
+                    h.as_str()
+                ));
+            }
+            LoadOutcome::Loaded(p)
+        }
         Err(e) => LoadOutcome::Invalid(e.to_string()),
     }
+}
+
+/// Follow a chain of symlinks at the final path component (the target may not exist yet).
+fn resolve_write_target(path: &Path) -> io::Result<std::path::PathBuf> {
+    let mut cur = path.to_path_buf();
+    for _ in 0..40 {
+        match std::fs::symlink_metadata(&cur) {
+            Ok(m) if m.file_type().is_symlink() => {
+                let link = std::fs::read_link(&cur)?;
+                cur = match cur.parent() {
+                    Some(parent) => parent.join(link),
+                    None => link,
+                };
+            }
+            _ => return Ok(cur),
+        }
+    }
+    Err(io::Error::other("too many levels of symbolic links"))
 }
 
 impl Policy {
@@ -123,6 +150,9 @@ impl Policy {
     pub fn save_atomic(&self, path: &Path) -> io::Result<()> {
         let text = toml::to_string_pretty(self)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+        // Write THROUGH a symlinked policy path (Docker: /etc -> state volume); the link stays.
+        let path = resolve_write_target(path)?;
+        let path = path.as_path();
         let dir = match path.parent() {
             Some(d) if !d.as_os_str().is_empty() => d,
             _ => Path::new("."),
@@ -130,7 +160,8 @@ impl Policy {
         let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
         tmp.write_all(text.as_bytes())?;
         tmp.as_file().sync_all()?;
-        std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o644))?;
+        tmp.as_file()
+            .set_permissions(std::fs::Permissions::from_mode(0o644))?;
         tmp.persist(path).map_err(|e| e.error)?;
         // Best effort: make the rename itself durable.
         if let Ok(d) = std::fs::File::open(dir) {
@@ -297,5 +328,67 @@ mod tests {
             panic!("not loaded")
         };
         assert_eq!(q.max_concurrent_runs, 2);
+    }
+
+    #[test]
+    fn zero_timeout_is_invalid() {
+        let d = tempfile::tempdir().unwrap();
+        let o = load(&write(
+            &d,
+            "[harness.claude]\nenabled = true\npath = \"/x\"\npath_env = \"/bin\"\ntimeout_secs = 0\n",
+        ));
+        assert!(matches!(o, LoadOutcome::Invalid(ref r) if r.contains("timeout_secs")));
+        assert!(Policy::effective(&o).harness.is_empty());
+    }
+
+    #[test]
+    fn zero_limits_are_accepted() {
+        let d = tempfile::tempdir().unwrap();
+        let o = load(&write(
+            &d,
+            "max_request_bytes = 0\nmax_concurrent_runs = 0\n",
+        ));
+        assert!(matches!(o, LoadOutcome::Loaded(_)));
+    }
+
+    #[test]
+    fn save_through_file_symlink_keeps_link() {
+        let d = tempfile::tempdir().unwrap();
+        let vol = d.path().join("vol");
+        let etc = d.path().join("etc");
+        fs::create_dir(&vol).unwrap();
+        fs::create_dir(&etc).unwrap();
+        let target = vol.join("policy.toml");
+        let link = etc.join("policy.toml");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        // dangling at first: the target is created through the link
+        let mut p = Policy::empty();
+        p.max_concurrent_runs = 5;
+        p.save_atomic(&link).unwrap();
+        assert!(fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert!(!fs::symlink_metadata(&target)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        // and again over an existing target
+        p.max_concurrent_runs = 6;
+        p.save_atomic(&link).unwrap();
+        assert!(fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        let LoadOutcome::Loaded(q) = load(&target) else {
+            panic!("not loaded")
+        };
+        assert_eq!(q.max_concurrent_runs, 6);
+        assert_eq!(
+            fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+            0o644
+        );
+        assert_eq!(fs::read_dir(&vol).unwrap().count(), 1);
+        assert_eq!(fs::read_dir(&etc).unwrap().count(), 1);
     }
 }
