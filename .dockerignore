@@ -1,0 +1,4 @@
+# The image build (docker build -f docker/Dockerfile .) needs Cargo.*, crates/, bin/, lib/, docker/,
+# test/docker/ (the test image's fake CLIs) and, for MCP_FROM=prebuilt, dist/.
+target/
+.git/

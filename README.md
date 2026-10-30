@@ -1,34 +1,23 @@
-# Jodd AI host kit
+# jodd-ai-host
 
-An **AI host** is a machine you own where Jodd runs Claude Code or Codex for you.
-Jodd connects to it over SSH with a key that can do one thing only: run one of
-those two CLIs. This lets Jodd use them from Android, and from any computer that
+An **AI host** is a machine you own where Jodd runs Claude Code or Codex for
+you. Jodd connects over SSH with a key that can run one program only:
+`jodd-ai-mcp`. That program runs the CLIs the host's policy allows, and
+nothing else. This lets Jodd use them from Android, and from any computer that
 does not have them installed.
 
-This kit prepares that machine: a dedicated account (`jodd-ai`), password login
-for that account only, both CLIs from their official installers, and a helper
-command, `jodd-ai-host`.
+This repository holds `jodd-ai-mcp`, the installers for Linux and macOS, the
+Docker image, and the `jodd-ai-host` helper.
 
 **Your own CLI, your own account, on your own server, under the provider's
-terms.** You install the CLI and sign in to it yourself. Jodd never sees that
-sign-in. You are responsible for using it as Anthropic's terms
-([consumer](https://www.anthropic.com/legal/consumer-terms),
-[commercial](https://www.anthropic.com/legal/commercial-terms)) or
-OpenAI's [consumer terms](https://openai.com/policies/terms-of-use) or
-[business agreement](https://openai.com/policies/services-agreement/) allow.
+terms.** You install the CLI and sign in to it yourself; Jodd never sees that
+sign-in. It is for one person across their own devices: do not share a
+personal subscription, pool accounts or resell access. Details and the
+providers' terms are in the [install guide](docs/INSTALL.md).
 
-**Scope and provider terms.** This setup is for one person using their own
-provider account across their own devices. SSH connectivity and successful
-sign-in do not establish permission for every app integration. Jodd submits
-headless requests from its note features; it is more than a remote terminal.
-Do not share a personal subscription, pool accounts, or resell access. Separate
-OS accounts alone do not authorize a multi-user service. Account type,
-authentication method, provider policies and any required provider agreement
-still apply.
+## Install
 
-## Pick a path
-
-**Docker** (any machine with Docker and the Compose plugin):
+**Docker:**
 
 ```sh
 curl -fsSLO https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/main/docker/compose.yaml
@@ -36,45 +25,30 @@ docker compose up -d
 docker compose logs
 ```
 
-**Linux** (Ubuntu, Debian, Fedora and Alpine tested; RHEL not yet tested). Download, read, then run:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/main/install/linux.sh -o jodd-ai-host-install.sh
-less jodd-ai-host-install.sh
-sudo sh jodd-ai-host-install.sh
-```
-
-**macOS 13 or newer** (a Mac that stays on). Tested on one Apple Silicon Mac on
-macOS 27; try the dry run first, it changes nothing:
-
-```sh
-curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/main/install/macos.sh -o jodd-ai-host-install.sh
-sh jodd-ai-host-install.sh --dry-run
-sudo sh jodd-ai-host-install.sh
-```
-
-**On a VPS or any machine reachable from the internet, read the
-[install guide](docs/INSTALL.md) first.** Password login for the
-AI account is open until you lock it, and the Docker port is published on
-every address unless you set `JODD_AI_BIND`.
+**Linux** (Ubuntu, Debian, Fedora, Alpine) or **macOS 13+**: download the
+installer, read it, then run it with `sudo`. The
+[install guide](docs/INSTALL.md) has the commands for each, and what to
+check first on a VPS or any machine reachable from the internet.
 
 ## Then
 
-The commands below are for Linux and macOS. In Docker, drop `sudo` and put
-`docker compose exec ai-host` in front, as shown in parentheses.
+1. Sign in to the CLIs on the host: `sudo jodd-ai-host signin claude` and
+   `sudo jodd-ai-host signin codex`.
+2. In Jodd: **App settings** → **LLM provider** → **Agent CLI (headless)** →
+   **Runs on: A server**. Check the fingerprint against `jodd-ai-host fingerprint`.
+3. After Setup: `sudo jodd-ai-host adopt-keys`, then `sudo jodd-ai-host lock`.
 
-1. Sign in to the CLIs on the host, as yourself:
-   `sudo jodd-ai-host signin claude` and `sudo jodd-ai-host signin codex`
-   (Docker: `docker compose exec ai-host jodd-ai-host signin claude`, and the same with `codex`).
-2. In Jodd: **App settings** → **LLM provider** → **Agent CLI (headless)** → **Runs on: A server**.
-   Enter the host's address, its port (Docker: 2222), the user `jodd-ai` and the password.
-   Check that the fingerprint matches `jodd-ai-host fingerprint`
-   (Docker: `docker compose exec ai-host jodd-ai-host fingerprint`).
-3. After Setup, turn password login off: `sudo jodd-ai-host lock`
-   (Docker: `docker compose exec ai-host jodd-ai-host lock`).
+In Docker, drop `sudo` and put `docker compose exec ai-host` in front.
+**Upgrading a host set up before 1.0.0:** download the installer again and run it (or
+`docker compose pull && docker compose up -d`), then `sudo jodd-ai-host adopt-keys`.
 
-## Guides
+## Documents
 
-- [Install guide](docs/INSTALL.md): every path, networking, hardening, updating, removing, troubleshooting.
-- [User guide](https://github.com/BBM-Co-ORG/Jodd-public/blob/main/docs/ai-host/USER-GUIDE.md): the Jodd side, and every message Jodd can show with what to do.
-- [How it works](docs/HOW-IT-WORKS.md): what the key can and cannot do, where your data goes, what is stored where.
+- [Install guide](docs/INSTALL.md) ([ภาษาไทย](docs/INSTALL.th.md)): every path, networking, hardening, updating, removing, troubleshooting.
+- [How it works](docs/HOW-IT-WORKS.md): the parts, the policy, what the key can and cannot do, where your data goes.
+- [Protocol](docs/PROTOCOL.md): for client authors. The MCP tools, their errors, and the compatibility rules.
+- [Harness flags](docs/HARNESS-FLAGS.md): why each CLI flag is there.
+- [Jodd user guide](https://github.com/BBM-Co-ORG/Jodd-public/blob/main/docs/ai-host/USER-GUIDE.md): the Jodd side, and every message Jodd can show.
+- [Changelog](CHANGELOG.md)
+
+Licence: Apache-2.0.

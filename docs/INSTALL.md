@@ -7,6 +7,11 @@ over SSH. This guide sets one up, connects Jodd to it, and keeps it safe. How
 it works inside is in [How it works](HOW-IT-WORKS.md); the Jodd side is in the
 [user guide](https://github.com/BBM-Co-ORG/Jodd-public/blob/main/docs/ai-host/USER-GUIDE.md).
 
+Every path installs `jodd-ai-mcp`, the program Jodd's keys run, and a policy
+that says which CLIs Jodd may run. **Upgrading a host set up before 1.0.0?**
+See [Update](#update): re-run the installer (or `docker compose pull`), then
+run `sudo jodd-ai-host adopt-keys` once.
+
 **Your own CLI, your own account, on your own server, under the provider's
 terms.** You install the CLI and sign in to it yourself; Jodd never sees that
 sign-in. You are responsible for using it as Anthropic's terms
@@ -26,14 +31,27 @@ still apply.
 
 ## What has been tested
 
-| Path | Tested | How |
+These rows describe the kit **before 1.0.0**. The 1.0.0 installers (the
+`jodd-ai-mcp` download with its SHA-256 and version checks, the policy,
+`auto-enable`, `adopt-keys`) have **not yet been run end to end** on any of
+these Linux distributions or on a Mac. What has run for 1.0.0 is below the
+table.
+
+| Path | Tested (before 1.0.0) | How |
 |---|---|---|
 | Docker | 2026-10-15 | The image, started with `docker run`: first start without network, both CLIs installed, Jodd's own setup code connecting and finding both CLIs, `lock` / `unlock`, and recreating the container (fingerprint, installed CLIs and lock kept). The `compose.yaml` file itself has not been run end to end yet. |
 | Ubuntu 24.04, Debian 12, Fedora, Alpine | 2026-10-15 | The installer in clean containers: real CLIs installed, real password logins, Jodd's own setup code connecting and finding both CLIs, a server whose sshd already turned password login off for everyone (every other account kept its settings), re-runs that change nothing. Starting sshd through systemd or OpenRC was not part of these tests. |
 | macOS | 2026-10-15 | One Apple Silicon Mac on macOS 27 (OpenSSH 10.3): a new account created, the Remote Login allow-list limited to `jodd-ai`, both CLIs installed, Jodd's own setup code connecting with the password and finding both CLIs, the fingerprint matching what sshd serves, `lock`, and a re-run on the existing account that moved it into a group of its own. macOS 13–26, Intel Macs, `--no-sleep` and the removal steps were not tested. |
 
-All of these runs were on **ARM64** (aarch64) machines. Nothing has been run
-on x86_64 (Intel or AMD) yet.
+All of these runs were on **ARM64** (aarch64) machines.
+
+For 1.0.0, CI tests the **Docker image** end to end on x86_64 Linux on every
+change: over real SSH with Jodd's restricted key, both protocols,
+`adopt-keys`, cancelling, the policy kept across a container recreate, and
+`lock` / `unlock`, with stand-in CLIs. The installers' own pieces (download,
+checksum, version check) have unit tests. The end-to-end installer test for
+the four distributions (`test/e2e/linux.sh`) exists but has **not been run**
+for 1.0.0, and the macOS installer has not been run live with `jodd-ai-mcp`.
 
 ## Before you start
 
@@ -45,8 +63,9 @@ You need:
   - Claude Code: a Claude Pro, Max, Team or Enterprise plan, or an Anthropic Console account.
   - Codex: a ChatGPT plan.
 - **Jodd 0.34.0 or newer** on your devices.
-- **`curl`** on the host, to download the kit. Most systems have it; if not,
-  install it with your package manager (or download the same URLs with `wget -O`).
+- **`curl`** on the host, to download the installer and `jodd-ai-mcp`. Most
+  systems have it; if not, install it with your package manager (or download
+  the same URLs with `wget -O`).
 
 Choose one path:
 
@@ -106,7 +125,9 @@ docker compose logs
 ```
 
 The log shows the host-key fingerprint, the generated password (if you did not
-set one), and `jodd-ai-host ready`. Both CLIs install in the background on the
+set one), and `jodd-ai-host ready`. `jodd-ai-mcp` is part of the image. The
+policy lives in the `state` volume, and on every start the container enables
+each CLI it finds that the policy has no decision for yet. Both CLIs install in the background on the
 first start; after a few minutes, run `docker compose logs` again and look for
 `CLIs installed`. If it says `could not install the CLIs`, check the machine's
 internet connection, then run:
@@ -190,22 +211,33 @@ What it does, in order:
 1. Installs the OpenSSH server, `curl`, `bash` and a few basic tools with your
    package manager. On Ubuntu and Debian it does not upgrade packages you
    already have.
-2. Creates the account `jodd-ai` with `bash` as its login shell, and puts
+2. Downloads `jodd-ai-mcp` for this machine from the
+   [latest release](https://github.com/BBM-Co-ORG/jodd-ai-host/releases/latest),
+   checks its SHA-256 and its version, and installs it as
+   `/usr/local/bin/jodd-ai-mcp`, owned by root. It creates an empty policy,
+   `/etc/jodd-ai-host/policy.toml`, if there is none. If the download fails,
+   it stops before it changes any account or SSH setting. The helper
+   `jodd-ai-host` and its files come from that same release (never from
+   `main`), so the kit and `jodd-ai-mcp` always match.
+3. Creates the account `jodd-ai` with `bash` as its login shell, and puts
    `~/.local/bin` on its login `PATH`.
-3. Sets the account's password.
-4. Creates missing SSH host keys. It never replaces existing ones.
-5. Writes `/etc/ssh/sshd_config.d/50-jodd-ai.conf`. It allows password login
+4. Sets the account's password.
+5. Creates missing SSH host keys. It never replaces existing ones.
+6. Writes `/etc/ssh/sshd_config.d/50-jodd-ai.conf`. It allows password login
    **for `jodd-ai` only**; every other account keeps the server's settings.
    It makes sure sshd reads that file first, checks the result with `sshd -t`,
    and compares the effective settings of other accounts before and after. If
    anything is off, it puts the SSH configuration back exactly as it was and stops.
-6. Installs `claude` and `codex` as `jodd-ai`, from their official installers.
-7. Starts or reloads sshd. Open SSH sessions are not dropped.
-8. Installs `/usr/local/bin/jodd-ai-host`, runs `jodd-ai-host doctor`, and
+7. Installs `claude` and `codex` as `jodd-ai`, from their official installers,
+   and enables each CLI it finds in the policy, unless you disabled it before.
+8. Starts or reloads sshd. Open SSH sessions are not dropped.
+9. Installs `/usr/local/bin/jodd-ai-host`, runs `jodd-ai-host doctor`, and
    prints the host address, port, account and fingerprint.
 
-Running it again repairs what is missing and changes nothing else. It keeps
-the account's password, and keeps password login off if you locked it.
+Running it again repairs what is missing, installs the latest `jodd-ai-mcp`
+and changes nothing else. It keeps the account's password, the policy, and
+password login off if you locked it. Without network, a re-run keeps the
+`jodd-ai-mcp` that is already installed and says so.
 
 Settings you can pass to the installer:
 
@@ -214,7 +246,8 @@ Settings you can pass to the installer:
 | `JODD_AI_USER` | The account name (default `jodd-ai`). It must not exist yet, or must be an ordinary account that cannot become root. |
 | `JODD_AI_PASSWORD` | The password, for a run without a terminal. A later run applies it again only if you change it. |
 | `JODD_AI_PORT` | Only the port the summary shows (for example a port you forward). It does not change sshd's port. |
-| `JODD_AI_SKIP_CLIS=1` | Skip the CLI install, for a machine without internet. Install them later with `sudo jodd-ai-host update-clis`. |
+| `JODD_AI_SKIP_CLIS=1` | Skip the CLI install, for a machine without internet. Install them later with `sudo jodd-ai-host update-clis`, then `sudo jodd-ai-host enable claude` (and `codex`). |
+| `JODD_AI_MCP_VERSION` | Install this release (for example `1.0.0`) instead of the latest: `jodd-ai-mcp` and the helper's files both come from it. |
 
 Put them between `sudo` and `sh`, for example:
 
@@ -266,6 +299,10 @@ sudo sh jodd-ai-host-install.sh
 
 What it does:
 
+0. Downloads `jodd-ai-mcp` for this Mac, checks its SHA-256 and its version,
+   and installs it as `/usr/local/bin/jodd-ai-mcp`, owned by root, with an
+   empty policy `/etc/jodd-ai-host/policy.toml` if there is none. If that
+   fails, it stops before it changes anything else.
 1. Creates a standard account, `jodd-ai` ("Jodd AI host"), hidden from the
    login window, and asks you for its password. The prompt comes from macOS's
    own `sysadminctl`: it shows `User password:`, asks **once** with no
@@ -285,7 +322,8 @@ What it does:
    has Full Disk Access. If it does not, the installer tells you to open
    **System Settings → General → Sharing** and turn **Remote Login** on, and
    waits until you press Enter.
-5. Installs `claude` and `codex` as `jodd-ai`, from their official installers.
+5. Installs `claude` and `codex` as `jodd-ai`, from their official installers,
+   and enables each CLI it finds in the policy, unless you disabled it before.
 6. Installs `/usr/local/bin/jodd-ai-host` and prints the address, port,
    account and fingerprint. It also lists other home folders on the Mac that
    other accounts can still enter, each with the `chmod 700` command that
@@ -330,7 +368,7 @@ which keeps the Mac awake while it is on its charger:
 sudo sh jodd-ai-host-install.sh --no-sleep
 ```
 
-`JODD_AI_USER` and `JODD_AI_SKIP_CLIS=1` work as on Linux. `JODD_AI_PASSWORD`
+`JODD_AI_USER`, `JODD_AI_SKIP_CLIS=1` and `JODD_AI_MCP_VERSION` work as on Linux. `JODD_AI_PASSWORD`
 is different: it is used only when the installer creates the account. It never
 changes the password of an account that already exists (use
 `sudo jodd-ai-host password` for that). Prefer the password prompt to
@@ -345,9 +383,11 @@ have not been tested as a whole. Commands below assume `sudo`; use root
 directly if you do not have it.
 
 The host needs: an OpenSSH server (tested with 9.2 to 10.3; older versions
-may work but have not been tested), `sh`, `bash`, `curl`, `base64`,
-`sha256sum` or `shasum`, `mktemp`, a `head` that supports `-c`, and `setsid`
-(from util-linux).
+may work but have not been tested), `sh`, `bash`, `curl`, `tar`, `sha256sum`
+or `shasum`, and `mktemp`. `jodd-ai-mcp` is a static program for Linux on
+x86_64 or arm64. Jodd releases from before the MCP client also need `base64`,
+a `head` that supports `-c`, and `setsid` (from util-linux) for the helper
+their Setup installs.
 
 **1. Create the account** with `bash` as its login shell:
 
@@ -437,22 +477,23 @@ the same line as before. If anything is wrong, undo steps 3 and 4.
 **6. Reload sshd** the way your system does it, for example `sudo systemctl
 reload sshd`, `sudo rc-service sshd reload` or `sudo service sshd reload`.
 
-**7. Install the helper.**
+**7. Install the helper.** Take it from the same release as `jodd-ai-mcp` in
+step 8 (here `v1.0.0`), not from `main`.
 
 ```sh
 sudo mkdir -p /usr/local/lib/jodd-ai-host
 ```
 
 ```sh
-sudo curl -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/main/bin/jodd-ai-host -o /usr/local/bin/jodd-ai-host
+sudo curl -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/v1.0.0/bin/jodd-ai-host -o /usr/local/bin/jodd-ai-host
 ```
 
 ```sh
-sudo curl -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/main/lib/dropin.sh -o /usr/local/lib/jodd-ai-host/dropin.sh
+sudo curl -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/v1.0.0/lib/dropin.sh -o /usr/local/lib/jodd-ai-host/dropin.sh
 ```
 
 ```sh
-sudo curl -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/main/lib/doctor.sh -o /usr/local/lib/jodd-ai-host/doctor.sh
+sudo curl -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/v1.0.0/lib/doctor.sh -o /usr/local/lib/jodd-ai-host/doctor.sh
 ```
 
 ```sh
@@ -471,7 +512,60 @@ JODD_AI_HOSTKEY=/etc/ssh/ssh_host_ed25519_key.pub
 JODD_AI_LIB=/usr/local/lib/jodd-ai-host
 ```
 
-**8. Check everything:**
+**8. Install `jodd-ai-mcp`.** Pick the file for your machine on the
+[releases page](https://github.com/BBM-Co-ORG/jodd-ai-host/releases/latest):
+`jodd-ai-mcp-<version>-x86_64-unknown-linux-musl.tar.gz` or
+`jodd-ai-mcp-<version>-aarch64-unknown-linux-musl.tar.gz`, and the
+`.sha256` file next to it. With version 1.0.0 on x86_64:
+
+```sh
+curl -fsSLO https://github.com/BBM-Co-ORG/jodd-ai-host/releases/download/v1.0.0/jodd-ai-mcp-1.0.0-x86_64-unknown-linux-musl.tar.gz
+```
+
+```sh
+curl -fsSLO https://github.com/BBM-Co-ORG/jodd-ai-host/releases/download/v1.0.0/jodd-ai-mcp-1.0.0-x86_64-unknown-linux-musl.tar.gz.sha256
+```
+
+This must print `OK`:
+
+```sh
+sha256sum -c jodd-ai-mcp-1.0.0-x86_64-unknown-linux-musl.tar.gz.sha256
+```
+
+```sh
+tar -xzf jodd-ai-mcp-1.0.0-x86_64-unknown-linux-musl.tar.gz
+```
+
+```sh
+sudo install -o root -g root -m 0755 jodd-ai-mcp /usr/local/bin/jodd-ai-mcp
+```
+
+Create the policy directory and an empty policy (nothing enabled yet), and
+the log directory, which belongs to the account:
+
+```sh
+sudo install -d -o root -g root -m 0755 /etc/jodd-ai-host
+```
+
+```sh
+sudo install -o root -g root -m 0644 /dev/null /etc/jodd-ai-host/policy.toml
+```
+
+```sh
+sudo install -d -o jodd-ai -m 0700 /var/log/jodd-ai-host
+```
+
+**9. Enable the CLIs** you installed in step 2:
+
+```sh
+sudo jodd-ai-host enable claude
+```
+
+```sh
+sudo jodd-ai-host enable codex
+```
+
+**10. Check everything:**
 
 ```sh
 sudo jodd-ai-host doctor
@@ -504,6 +598,33 @@ the code.
 
 In Docker, use `docker compose exec ai-host jodd-ai-host signin claude` and
 `docker compose exec ai-host jodd-ai-host signin codex`.
+
+## Choose which CLIs Jodd may run
+
+The policy decides which CLIs Jodd may run. The installers and the Docker
+image enable each CLI they find, unless you decided otherwise. See what is
+enabled:
+
+```sh
+jodd-ai-host list
+```
+
+Stop Jodd running a CLI (here Codex):
+
+```sh
+sudo jodd-ai-host disable codex
+```
+
+Let it run it again. This also records where the CLI is, so run it again if
+you reinstall a CLI somewhere else:
+
+```sh
+sudo jodd-ai-host enable codex
+```
+
+A change applies to Jodd's next request. `disable` is kept across re-runs of
+the installer and `docker compose pull`. In Docker:
+`docker compose exec ai-host jodd-ai-host disable codex`.
 
 ## Connect from Jodd
 
@@ -583,14 +704,24 @@ refuses the host until you set it up again.
 
 ## Harden
 
-**Turn password login off after Setup.** Jodd uses its key from then on and
-does not need the password:
+**After Setup in Jodd, point Jodd's key at `jodd-ai-mcp`.** Jodd releases
+from before the MCP client install their own helper during Setup and point
+their key at it, outside the policy. This re-points those lines; it is safe
+to run any time, and `jodd-ai-host doctor` says when it is needed:
+
+```sh
+sudo jodd-ai-host adopt-keys
+```
+
+**Then turn password login off.** Jodd uses its key from then on and does not
+need the password:
 
 ```sh
 sudo jodd-ai-host lock
 ```
 
-Before you press **Reinstall helper** in Jodd, turn it on again, and off after:
+Before you press **Reinstall helper** in Jodd, turn it on again; after it,
+run `adopt-keys` and `lock` again:
 
 ```sh
 sudo jodd-ai-host unlock
@@ -644,11 +775,16 @@ In Docker:
 docker compose exec ai-host jodd-ai-host update-clis
 ```
 
-If a CLI was not installed when you set up Jodd, press **Reinstall helper** in Jodd
-afterwards (with password login unlocked), so Jodd learns where it is.
+If a CLI was not installed before, enable it after it installs, so Jodd may
+run it:
 
-**The kit on Linux and macOS.** Download the installer again and run it. It
-keeps the account, its password, your sign-ins, Jodd's keys and the lock.
+```sh
+sudo jodd-ai-host enable codex
+```
+
+**The host on Linux and macOS.** Download the installer again and run it. It
+installs the latest `jodd-ai-mcp`, and keeps the account, its password, your
+sign-ins, Jodd's keys, the policy and the lock.
 
 **Docker.** From the folder with `compose.yaml`:
 
@@ -665,8 +801,27 @@ from `.env` is applied again. Without one, the new container makes up a new
 password and shows it in `docker compose logs`; you only need it for the next
 Setup, Change server or Reinstall helper in Jodd.
 
-**Jodd's part on the host.** When Jodd says the host needs an update, unlock
-password login, press **Reinstall helper** in Jodd, then lock again.
+**A host set up before 1.0.0.** After the update, run this once. It points
+Jodd's existing keys at `jodd-ai-mcp`; nothing is needed in Jodd, and Jodd
+keeps working while you do it:
+
+```sh
+sudo jodd-ai-host adopt-keys
+```
+
+In Docker:
+
+```sh
+docker compose exec ai-host jodd-ai-host adopt-keys
+```
+
+Then `sudo jodd-ai-host doctor` (Docker: `docker compose exec ai-host
+jodd-ai-host doctor`) should list no key that "still runs an older helper".
+The old helper files in `~/.jodd/` are no longer used; you may delete them.
+
+**Jodd's part on the host.** If an older Jodd says the host needs an update,
+unlock password login, press **Reinstall helper** in Jodd, then run
+`adopt-keys` and `lock` again.
 
 ## Remove everything
 
@@ -692,11 +847,11 @@ If the installer added a line `Include /etc/ssh/sshd_config.d/50-jodd-ai.conf`
 two lines. Then remove the kit's files:
 
 ```sh
-sudo rm -f /etc/ssh/sshd_config.d/50-jodd-ai.conf /etc/jodd-ai-host.conf /usr/local/bin/jodd-ai-host
+sudo rm -f /etc/ssh/sshd_config.d/50-jodd-ai.conf /etc/jodd-ai-host.conf /usr/local/bin/jodd-ai-host /usr/local/bin/jodd-ai-mcp
 ```
 
 ```sh
-sudo rm -rf /usr/local/lib/jodd-ai-host /var/lib/jodd-ai-host
+sudo rm -rf /usr/local/lib/jodd-ai-host /var/lib/jodd-ai-host /etc/jodd-ai-host /var/log/jodd-ai-host
 ```
 
 Check the SSH configuration (it must print nothing), then reload sshd as in
@@ -729,7 +884,8 @@ sudo jodd-ai-host doctor
 ```
 
 `status` shows what Jodd will find: the account, port, fingerprint, whether
-password login is on, each CLI and its version, and how many Jodd keys there are.
+password login is on, each CLI and its version, how many Jodd keys there are,
+the `jodd-ai-mcp` version and the policy.
 
 ```sh
 sudo jodd-ai-host status
@@ -740,7 +896,10 @@ In Docker, run these and every command below as
 
 | Symptom | What to run |
 |---|---|
-| A CLI shows **not installed** in Jodd, or Jodd says it isn't installed | `sudo jodd-ai-host update-clis`, then `unlock`, **Reinstall helper** in Jodd, `lock` |
+| A CLI shows **not installed** in Jodd, or Jodd says it isn't installed | `sudo jodd-ai-host list`. Not there or not installed: `sudo jodd-ai-host update-clis`, then `sudo jodd-ai-host enable claude` (or `codex`). Shown as disabled: `sudo jodd-ai-host enable …` if you want Jodd to use it |
+| Jodd says a CLI is not enabled on this host | `sudo jodd-ai-host enable claude` (or `codex`) |
+| The doctor or `status` says a key "still runs an older helper" or is "not on jodd-ai-mcp" | `sudo jodd-ai-host adopt-keys` |
+| The doctor says `jodd-ai-mcp` is not installed, or the policy is invalid | Re-run the installer (Docker: `docker compose pull` and `docker compose up -d`); for the policy, do what the doctor's `FIX` line says |
 | The CLI install failed (no internet during install) | `sudo jodd-ai-host update-clis` |
 | Jodd's **Test connection** says Claude Code is not signed in | `sudo jodd-ai-host signin claude` |
 | Codex answers with a sign-in or authorization error | `sudo jodd-ai-host signin codex` |

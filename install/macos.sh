@@ -10,6 +10,10 @@
 #   sudo sh jodd-ai-host-install.sh
 #
 # What it does, in order (re-running repairs instead of duplicating):
+#   0. downloads jodd-ai-mcp (the program Jodd's keys run) for this Mac from the kit's GitHub
+#      release, checks its SHA-256 and installs it at /usr/local/bin/jodd-ai-mcp, owned by
+#      root:wheel (re-running upgrades it); creates /etc/jodd-ai-host/ with an empty policy.toml
+#      if there is none (an existing policy is kept: it holds your decisions)
 #   1. creates a standard, hidden account (zsh login shell, ~/.local/bin on its login PATH);
 #      asks you for its password - the password is only for Jodd's one-time Setup;
 #      afterwards `sudo jodd-ai-host lock` turns it off. The account gets a group of its own
@@ -24,7 +28,9 @@
 #   4. turns Remote Login on and lets the account in (System Settings -> General -> Sharing).
 #      macOS only lets a terminal do this with Full Disk Access; if yours has none, the
 #      installer tells you the three clicks and waits
-#   5. installs claude and codex as the account, from their official installers
+#   5. installs claude and codex as the account, from their official installers, and enables
+#      each one found in the policy - unless the policy already has a decision for it (a
+#      `jodd-ai-host disable` survives every re-run); creates /var/log/jodd-ai-host for the account
 #   6. installs /usr/local/bin/jodd-ai-host and prints what to do next
 #
 # Options:
@@ -47,11 +53,14 @@
 #                     account's password is never changed (sudo jodd-ai-host password).
 #   JODD_AI_PORT      only what the final summary reports (e.g. a forwarded port)
 #   JODD_AI_KIT_URL   where bin/ and lib/ are fetched from when this script is not run
-#                     from a checkout of the kit
-#                     (default https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/main)
+#                     from a checkout of the kit (default: the release jodd-ai-mcp comes from,
+#                     https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/v<version>)
 #   JODD_AI_SKIP_CLIS=1   do not install claude / codex (offline runs; `jodd-ai-host update-clis` later)
+#   JODD_AI_MCP_VERSION   install this jodd-ai-mcp release (e.g. 1.0.0); default: the latest
 #
-# Test-only knob (the same one linux.sh has; used by the live-run checklist, never needed otherwise):
+# Test-only knobs (the same ones linux.sh has; never needed otherwise):
+#   JODD_AI_MCP_BASE_URL=URL  fetch the jodd-ai-mcp release assets from URL (file:// works) instead
+#                     of the GitHub release; needs JODD_AI_MCP_VERSION
 #   JODD_AI_TEST_INTERRUPT=after-config-write
 #                     send this script an INT right after it wrote the sshd config and
 #                     before it validated it, to prove the interrupt rolls the config back
@@ -62,7 +71,7 @@ set -eu
 # Where bin/ and lib/ are, if we run from a checkout - found before the cd below, as $0 may be relative.
 case $0 in */*) here=$(cd "$(dirname "$0")" && pwd) ;; *) here= ;; esac
 local_kit=
-if [ -n "$here" ] && [ -f "$0" ] && [ -f "$here/../bin/jodd-ai-host" ] && [ -f "$here/../lib/dropin.sh" ] && [ -f "$here/../lib/doctor.sh" ]; then
+if [ -n "$here" ] && [ -f "$0" ] && [ -f "$here/../bin/jodd-ai-host" ] && [ -f "$here/../lib/dropin.sh" ] && [ -f "$here/../lib/doctor.sh" ] && [ -f "$here/../lib/mcp.sh" ]; then
   local_kit=$(cd "$here/.." && pwd)
 fi
 # Then leave the caller's directory: it may be gone, or closed to the AI account, and every shell
@@ -71,7 +80,7 @@ cd /
 
 user=${JODD_AI_USER:-jodd-ai}
 fullname="Jodd AI host"
-kit_url=${JODD_AI_KIT_URL:-https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/main}
+kit_url=${JODD_AI_KIT_URL:-}   # set by kit_release below unless given
 sshd=/usr/sbin/sshd
 sshd_config=/etc/ssh/sshd_config
 dropin_dir=/etc/ssh/sshd_config.d
@@ -156,6 +165,28 @@ say "macOS $macos_version"
 work=$(mktemp -d) || die "cannot create a temp directory."
 
 # --- bin/ and lib/ come from this checkout if we run from one (local_kit, found above), else the kit URL
+# bin/ and lib/ always come from the same release as jodd-ai-mcp: from a checkout of the kit, the
+# checkout's own files; else the tag v<version> of the release the binary is downloaded from
+# (JODD_AI_MCP_VERSION, or the latest, resolved once here so the kit and the binary agree), never
+# main, which can be ahead of the release. JODD_AI_KIT_URL, when set, is used as it is.
+kit_release() {
+  { [ -z "$local_kit" ] && [ -z "${JODD_AI_KIT_URL:-}" ]; } || return 0
+  _kv=${JODD_AI_MCP_VERSION:-}
+  if [ -z "$_kv" ]; then
+    _ku=$(curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/BBM-Co-ORG/jodd-ai-host/releases/latest) || _ku=
+    _kv=${_ku##*/}
+  fi
+  _kv=${_kv#v}
+  case $_kv in
+    *[!0-9A-Za-z.+-]*|'') _kv=bad ;;
+  esac
+  case $_kv in
+    [0-9]*.[0-9]*.[0-9]*) ;;
+    *) warn "cannot tell which jodd-ai-host release to install (no network?). Pin one with JODD_AI_MCP_VERSION=<version> (like 1.0.0), or run this installer from a checkout of the kit."; return 1 ;;
+  esac
+  JODD_AI_MCP_VERSION=$_kv; export JODD_AI_MCP_VERSION
+  kit_url=https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/v$_kv
+}
 
 # ---------------------------------------------------------------- helper files ----------
 # Fetched/copied first so everything below can use render_dropin. A dry run fetches them too (a
@@ -164,14 +195,19 @@ fetch() { # $1 path under the kit, $2 destination
   if [ -n "$local_kit" ]; then
     cp "$local_kit/$1" "$2" || die "cannot copy $local_kit/$1."
   else
-    curl --proto '=https' --tlsv1.2 -fsSL "$kit_url/$1" -o "$2" || die "cannot download $kit_url/$1 (no network?). Download the kit and run install/macos.sh from it."
+    curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL "$kit_url/$1" -o "$2" || die "cannot download $kit_url/$1 (no network?). Download the kit and run install/macos.sh from it."
   fi
   if [ ! -s "$2" ] || ! sh -n "$2"; then die "$1 from the kit is empty or not a shell script; nothing was installed."; fi
 }
+# After the packages (curl may be one of them), before the first fetch.
+kit_release || die "the kit was not fetched (message above); no account, sshd or jodd-ai-mcp setting was changed."
 mkdir -p "$work/kit/bin" "$work/kit/lib"
 fetch bin/jodd-ai-host "$work/kit/bin/jodd-ai-host"
 fetch lib/dropin.sh "$work/kit/lib/dropin.sh"
 fetch lib/doctor.sh "$work/kit/lib/doctor.sh"
+fetch lib/mcp.sh "$work/kit/lib/mcp.sh"
+# shellcheck disable=SC1091
+. "$work/kit/lib/mcp.sh"
 if [ "$dry" = 1 ]; then
   plan "install $helper and $libdir/{dropin,doctor}.sh (from ${local_kit:-$kit_url})"
   # shellcheck disable=SC1091
@@ -182,6 +218,18 @@ else
   cp "$work/kit/bin/jodd-ai-host" "$helper.new" && chmod 755 "$helper.new" && mv "$helper.new" "$helper"
   # shellcheck disable=SC1091
   . "$libdir/dropin.sh"
+fi
+
+# ---------------------------------------------------------------- 0. jodd-ai-mcp + policy -
+# The checksum is verified before anything is unpacked; on any failure the binary already
+# installed (if any) stays as it was, and the installer stops here.
+if [ "$dry" = 1 ]; then
+  plan "download jodd-ai-mcp ${JODD_AI_MCP_VERSION:-(the latest release)} for $(mcp_target || echo '?'), check its SHA-256, install /usr/local/bin/jodd-ai-mcp (root:wheel, 0755)"
+  if [ -e /etc/jodd-ai-host/policy.toml ]; then plan "keep /etc/jodd-ai-host/policy.toml as it is (owner root, mode 0644)"
+  else plan "create /etc/jodd-ai-host (root, 0755) and an empty policy.toml in it (root, 0644): nothing enabled yet"; fi
+else
+  mcp_install /usr/local/bin/jodd-ai-mcp wheel || die "jodd-ai-mcp was not installed (message above). The installer stopped before changing any account or sshd setting; run it again once that is fixed."
+  mcp_policy_init wheel || die "the policy directory could not be set up (message above)."
 fi
 
 # ---------------------------------------------------------------- 1. account ------------
@@ -775,6 +823,9 @@ fi
 
 # ---------------------------------------------------------------- 5. CLIs ---------------
 cli_ok=1
+# Where jodd-ai-mcp, running as the account, writes its one line per call when there is no syslog.
+if [ "$dry" = 1 ]; then plan "create /var/log/jodd-ai-host, owned by $user, mode 0700"
+else mcp_log_dir "$user" || warn "jodd-ai-mcp logs to syslog only. Check: sudo jodd-ai-host doctor"; fi
 if [ "$dry" = 1 ]; then
   if [ "${JODD_AI_SKIP_CLIS:-}" = 1 ]; then plan "skip the CLI install (JODD_AI_SKIP_CLIS=1)"
   else
@@ -791,6 +842,9 @@ else
     warn "At least one CLI did not install (no network?). Everything else is set up. Retry later: sudo jodd-ai-host update-clis"
   fi
 fi
+# Enable each CLI found, unless the policy already decided on it (so a disable sticks).
+if [ "$dry" = 1 ]; then plan "enable each CLI found in the policy, unless it already has a decision: jodd-ai-host auto-enable"
+else "$helper" auto-enable || warn "the policy was not updated (message above). Check: sudo jodd-ai-host list"; fi
 
 # ---------------------------------------------------------------- sleep -----------------
 if [ "$nosleep" = 1 ]; then
@@ -840,6 +894,8 @@ Next:
      (or Account settings -> LLM Provider, for one account's own provider).
      Enter the host, port $shown_port, user $user and the password; confirm the fingerprint.
   3. After Setup:  sudo jodd-ai-host lock     (before an Update in Jodd:  sudo jodd-ai-host unlock)
+  Upgrading a host Jodd already uses? Run once:  sudo jodd-ai-host adopt-keys
+  (doctor, above, warns about every key that still needs it). Which CLIs Jodd may run: jodd-ai-host list
 
 Keep this Mac awake, or Jodd cannot reach it while you are away:
   System Settings -> Energy -> "Prevent automatic sleeping when the display is off"

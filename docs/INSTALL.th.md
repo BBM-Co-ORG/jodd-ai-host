@@ -7,6 +7,11 @@ AI host คือเครื่องของคุณเองที่ Jodd 
 ส่วนการทำงานภายในอยู่ใน [How it works](HOW-IT-WORKS.md) (ภาษาอังกฤษ)
 และฝั่งแอป Jodd อยู่ใน[คู่มือการใช้งาน](https://github.com/BBM-Co-ORG/Jodd-public/blob/main/docs/ai-host/USER-GUIDE.th.md)
 
+ทุกวิธีติดตั้ง `jodd-ai-mcp` ซึ่งเป็นโปรแกรมที่ key ของ Jodd ใช้รัน และติดตั้งนโยบาย (policy)
+ที่กำหนดว่า Jodd รัน CLI ตัวใดได้บ้าง **อัปเกรดเครื่อง host ที่ตั้งไว้ก่อนเวอร์ชัน 1.0.0?**
+ดู[อัปเดต](#update): รันตัวติดตั้งซ้ำ (หรือ `docker compose pull`) แล้วรัน
+`sudo jodd-ai-host adopt-keys` หนึ่งครั้ง
+
 **CLI ของคุณเอง บัญชีของคุณเอง บนเซิร์ฟเวอร์ของคุณเอง ภายใต้ข้อกำหนดของผู้ให้บริการ**
 คุณติดตั้ง CLI และลงชื่อเข้าใช้ (sign in) ด้วยตัวเอง Jodd ไม่เคยเห็นข้อมูลการลงชื่อเข้าใช้นั้น
 คุณเป็นผู้รับผิดชอบให้การใช้งานเป็นไปตามที่ข้อกำหนดของ Anthropic
@@ -23,14 +28,25 @@ Jodd ส่งคำขอแบบ headless จากฟีเจอร์โ�
 
 ## <a id="what-has-been-tested"></a>สิ่งที่ทดสอบแล้ว
 
-| วิธีติดตั้ง | ทดสอบเมื่อ | ทดสอบอย่างไร |
+ตารางนี้เป็นผลทดสอบของชุดติดตั้ง**ก่อนเวอร์ชัน 1.0.0** ตัวติดตั้งของเวอร์ชัน 1.0.0
+(การดาวน์โหลด `jodd-ai-mcp` พร้อมการตรวจ SHA-256 และเวอร์ชัน, นโยบาย, `auto-enable`,
+`adopt-keys`) **ยังไม่ได้รันทดสอบตั้งแต่ต้นจนจบ**บน Linux distribution ใดในตารางนี้
+และบน Mac สิ่งที่ทดสอบแล้วสำหรับ 1.0.0 อยู่ใต้ตาราง
+
+| วิธีติดตั้ง | ทดสอบเมื่อ (ก่อน 1.0.0) | ทดสอบอย่างไร |
 |---|---|---|
 | Docker | 2026-10-15 | ทดสอบ image โดยเริ่มด้วย `docker run`: เริ่มครั้งแรกโดยไม่มีเครือข่าย, ติดตั้ง CLI ทั้งสองตัว, โค้ดตั้งค่าของ Jodd เองเชื่อมต่อและพบ CLI ทั้งสองตัว, `lock` / `unlock` และสร้าง container ใหม่ (fingerprint, CLI ที่ติดตั้งไว้ และสถานะ lock ยังอยู่ครบ) ส่วนไฟล์ `compose.yaml` เองยังไม่ได้รันทดสอบตั้งแต่ต้นจนจบ |
 | Ubuntu 24.04, Debian 12, Fedora, Alpine | 2026-10-15 | ทดสอบตัวติดตั้งใน container ที่สะอาด: ติดตั้ง CLI ตัวจริง, เข้าสู่ระบบด้วยรหัสผ่านจริง, โค้ดตั้งค่าของ Jodd เองเชื่อมต่อและพบ CLI ทั้งสองตัว, เซิร์ฟเวอร์ที่ sshd ปิดการเข้าสู่ระบบด้วยรหัสผ่านสำหรับทุกบัญชีไว้แล้ว (บัญชีอื่นทุกบัญชียังคงค่าเดิม) และการรันซ้ำที่ไม่เปลี่ยนอะไรเลย การสั่งเริ่ม sshd ผ่าน systemd หรือ OpenRC ไม่ได้อยู่ในการทดสอบนี้ |
 | macOS | 2026-10-15 | ทดสอบบน Mac ชิป Apple Silicon หนึ่งเครื่องที่ใช้ macOS 27 (OpenSSH 10.3): สร้างบัญชีใหม่, จำกัดรายชื่อผู้ใช้ของ Remote Login ให้เหลือเฉพาะ `jodd-ai`, ติดตั้ง CLI ทั้งสองตัว, โค้ดตั้งค่าของ Jodd เองเชื่อมต่อด้วยรหัสผ่านและพบ CLI ทั้งสองตัว, fingerprint ตรงกับที่ sshd ส่งมา, `lock` และการรันซ้ำกับบัญชีเดิมที่ย้ายบัญชีไปอยู่ในกลุ่มของตัวเอง ยังไม่ได้ทดสอบ macOS 13–26, Mac ชิป Intel, `--no-sleep` และขั้นตอนการลบ |
 
-การทดสอบทั้งหมดนี้ทำบนเครื่อง **ARM64** (aarch64) ยังไม่มีการทดสอบบน x86_64
-(Intel หรือ AMD) เลย
+การทดสอบข้างต้นทำบนเครื่อง **ARM64** (aarch64)
+
+สำหรับเวอร์ชัน 1.0.0 CI ทดสอบ **Docker image** ตั้งแต่ต้นจนจบบน Linux x86_64 ทุกครั้งที่มีการเปลี่ยนแปลง:
+ผ่าน SSH จริงด้วย key แบบจำกัดสิทธิ์ของ Jodd, โปรโตคอลทั้งสองแบบ, `adopt-keys`, การยกเลิกงาน,
+นโยบายที่ยังอยู่หลังสร้าง container ใหม่ และ `lock` / `unlock` โดยใช้ CLI จำลอง
+ส่วนประกอบของตัวติดตั้ง (การดาวน์โหลด, checksum, การตรวจเวอร์ชัน) มี unit test
+ส่วนการทดสอบตัวติดตั้งตั้งแต่ต้นจนจบบนสี่ distribution (`test/e2e/linux.sh`) มีอยู่แล้วแต่
+**ยังไม่ได้รัน**สำหรับ 1.0.0 และตัวติดตั้งสำหรับ macOS ยังไม่ได้รันจริงกับ `jodd-ai-mcp`
 
 ## <a id="before-you-start"></a>ก่อนเริ่ม
 
@@ -42,7 +58,7 @@ Jodd ส่งคำขอแบบ headless จากฟีเจอร์โ�
   - Claude Code: แพ็กเกจ Claude Pro, Max, Team หรือ Enterprise หรือบัญชี Anthropic Console
   - Codex: แพ็กเกจ ChatGPT
 - **Jodd 0.34.0 ขึ้นไป** บนอุปกรณ์ของคุณ
-- **`curl`** บนเครื่อง host สำหรับดาวน์โหลดชุดติดตั้ง ระบบส่วนใหญ่มีอยู่แล้ว
+- **`curl`** บนเครื่อง host สำหรับดาวน์โหลดตัวติดตั้งและ `jodd-ai-mcp` ระบบส่วนใหญ่มีอยู่แล้ว
   ถ้าไม่มี ให้ติดตั้งด้วย package manager ของระบบ (หรือดาวน์โหลด URL เดียวกันด้วย `wget -O`)
 
 เลือกวิธีใดวิธีหนึ่ง:
@@ -102,7 +118,8 @@ docker compose logs
 ```
 
 log จะแสดง fingerprint ของ host key, รหัสผ่านที่สร้างขึ้น (ถ้าคุณไม่ได้ตั้งเอง)
-และข้อความ `jodd-ai-host ready` CLI ทั้งสองตัวจะติดตั้งอยู่เบื้องหลังในการเริ่มครั้งแรก
+และข้อความ `jodd-ai-host ready` `jodd-ai-mcp` อยู่ใน image แล้ว นโยบายเก็บอยู่ใน
+volume `state` และทุกครั้งที่ container เริ่ม จะเปิดใช้ CLI ที่พบซึ่งนโยบายยังไม่ได้ตัดสินใจไว้ CLI ทั้งสองตัวจะติดตั้งอยู่เบื้องหลังในการเริ่มครั้งแรก
 รอสักสองสามนาทีแล้วรัน `docker compose logs` อีกครั้ง มองหาข้อความ `CLIs installed`
 ถ้าขึ้นว่า `could not install the CLIs` ให้ตรวจการเชื่อมต่ออินเทอร์เน็ตของเครื่อง แล้วรัน:
 
@@ -180,21 +197,30 @@ sudo sh jodd-ai-host-install.sh
 
 1. ติดตั้ง OpenSSH server, `curl`, `bash` และเครื่องมือพื้นฐานอีกเล็กน้อยด้วย
    package manager ของระบบ บน Ubuntu และ Debian จะไม่อัปเกรดแพ็กเกจที่มีอยู่แล้ว
-2. สร้างบัญชี `jodd-ai` โดยใช้ `bash` เป็น login shell และเพิ่ม
+2. ดาวน์โหลด `jodd-ai-mcp` สำหรับเครื่องนี้จาก
+   [release ล่าสุด](https://github.com/BBM-Co-ORG/jodd-ai-host/releases/latest)
+   ตรวจ SHA-256 และเวอร์ชัน แล้วติดตั้งเป็น `/usr/local/bin/jodd-ai-mcp` โดยมี root
+   เป็นเจ้าของ และสร้างนโยบายว่าง `/etc/jodd-ai-host/policy.toml` ถ้ายังไม่มี
+   ถ้าดาวน์โหลดไม่สำเร็จ ตัวติดตั้งจะหยุดก่อนเปลี่ยนบัญชีหรือการตั้งค่า SSH ใด ๆ
+   ตัวช่วย `jodd-ai-host` และไฟล์ของมันมาจาก release เดียวกันนี้ (ไม่ใช่จาก `main`)
+   ชุดติดตั้งกับ `jodd-ai-mcp` จึงตรงกันเสมอ
+3. สร้างบัญชี `jodd-ai` โดยใช้ `bash` เป็น login shell และเพิ่ม
    `~/.local/bin` ลงใน `PATH` ของ login shell
-3. ตั้งรหัสผ่านของบัญชี
-4. สร้าง SSH host key ที่ยังไม่มี โดยไม่แทนที่ key ที่มีอยู่แล้วเด็ดขาด
-5. เขียนไฟล์ `/etc/ssh/sshd_config.d/50-jodd-ai.conf` ซึ่งเปิดการเข้าสู่ระบบด้วยรหัสผ่าน
+4. ตั้งรหัสผ่านของบัญชี
+5. สร้าง SSH host key ที่ยังไม่มี โดยไม่แทนที่ key ที่มีอยู่แล้วเด็ดขาด
+6. เขียนไฟล์ `/etc/ssh/sshd_config.d/50-jodd-ai.conf` ซึ่งเปิดการเข้าสู่ระบบด้วยรหัสผ่าน
    **เฉพาะ `jodd-ai` เท่านั้น** บัญชีอื่นทุกบัญชียังใช้ค่าเดิมของเซิร์ฟเวอร์
    ตัวติดตั้งจะทำให้ sshd อ่านไฟล์นี้ก่อน ตรวจผลด้วย `sshd -t`
    และเทียบค่าที่มีผลจริงของบัญชีอื่นก่อนและหลัง ถ้ามีอะไรผิดปกติ
    จะคืนค่า SSH กลับเป็นแบบเดิมทุกประการแล้วหยุด
-6. ติดตั้ง `claude` และ `codex` ในนามบัญชี `jodd-ai` จากตัวติดตั้งทางการของแต่ละตัว
-7. เริ่มหรือ reload sshd โดยไม่ตัด SSH session ที่เปิดอยู่
-8. ติดตั้ง `/usr/local/bin/jodd-ai-host` รัน `jodd-ai-host doctor` แล้วพิมพ์ที่อยู่ของ host, พอร์ต, ชื่อบัญชี และ fingerprint
+7. ติดตั้ง `claude` และ `codex` ในนามบัญชี `jodd-ai` จากตัวติดตั้งทางการของแต่ละตัว
+   แล้วเปิดใช้ CLI ที่พบในนโยบาย ยกเว้นตัวที่คุณเคยปิดไว้
+8. เริ่มหรือ reload sshd โดยไม่ตัด SSH session ที่เปิดอยู่
+9. ติดตั้ง `/usr/local/bin/jodd-ai-host` รัน `jodd-ai-host doctor` แล้วพิมพ์ที่อยู่ของ host, พอร์ต, ชื่อบัญชี และ fingerprint
 
-การรันซ้ำจะซ่อมสิ่งที่ขาดและไม่เปลี่ยนอย่างอื่น รหัสผ่านของบัญชียังคงเดิม
-และถ้าคุณ lock ไว้ การเข้าสู่ระบบด้วยรหัสผ่านก็ยังปิดอยู่
+การรันซ้ำจะซ่อมสิ่งที่ขาด ติดตั้ง `jodd-ai-mcp` เวอร์ชันล่าสุด และไม่เปลี่ยนอย่างอื่น
+รหัสผ่านของบัญชีและนโยบายยังคงเดิม และถ้าคุณ lock ไว้ การเข้าสู่ระบบด้วยรหัสผ่านก็ยังปิดอยู่
+ถ้าไม่มีเครือข่าย การรันซ้ำจะใช้ `jodd-ai-mcp` ที่ติดตั้งไว้แล้วต่อไปและแจ้งให้ทราบ
 
 ค่าที่ส่งให้ตัวติดตั้งได้:
 
@@ -203,7 +229,8 @@ sudo sh jodd-ai-host-install.sh
 | `JODD_AI_USER` | ชื่อบัญชี (ค่าเริ่มต้น `jodd-ai`) ต้องเป็นบัญชีที่ยังไม่มี หรือเป็นบัญชีธรรมดาที่ไม่สามารถเป็น root ได้ |
 | `JODD_AI_PASSWORD` | รหัสผ่าน สำหรับการรันที่ไม่มี terminal การรันครั้งถัดไปจะนำไปใช้ซ้ำก็ต่อเมื่อคุณเปลี่ยนค่านี้ |
 | `JODD_AI_PORT` | เป็นแค่พอร์ตที่แสดงในสรุปท้ายการติดตั้ง (เช่นพอร์ตที่คุณ forward ไว้) ไม่ได้เปลี่ยนพอร์ตของ sshd |
-| `JODD_AI_SKIP_CLIS=1` | ข้ามการติดตั้ง CLI สำหรับเครื่องที่ไม่มีอินเทอร์เน็ต ติดตั้งภายหลังได้ด้วย `sudo jodd-ai-host update-clis` |
+| `JODD_AI_SKIP_CLIS=1` | ข้ามการติดตั้ง CLI สำหรับเครื่องที่ไม่มีอินเทอร์เน็ต ติดตั้งภายหลังได้ด้วย `sudo jodd-ai-host update-clis` แล้วรัน `sudo jodd-ai-host enable claude` (และ `codex`) |
+| `JODD_AI_MCP_VERSION` | ติดตั้ง release นี้ (เช่น `1.0.0`) แทน release ล่าสุด ทั้ง `jodd-ai-mcp` และไฟล์ของตัวช่วยมาจาก release นี้ |
 
 ใส่ค่าเหล่านี้ไว้ระหว่าง `sudo` กับ `sh` เช่น:
 
@@ -255,6 +282,10 @@ sudo sh jodd-ai-host-install.sh
 
 สิ่งที่ตัวติดตั้งทำ:
 
+0. ดาวน์โหลด `jodd-ai-mcp` สำหรับ Mac เครื่องนี้ ตรวจ SHA-256 และเวอร์ชัน
+   แล้วติดตั้งเป็น `/usr/local/bin/jodd-ai-mcp` โดยมี root เป็นเจ้าของ
+   พร้อมนโยบายว่าง `/etc/jodd-ai-host/policy.toml` ถ้ายังไม่มี
+   ถ้าไม่สำเร็จ ตัวติดตั้งจะหยุดก่อนเปลี่ยนอย่างอื่น
 1. สร้างบัญชีมาตรฐาน `jodd-ai` ("Jodd AI host") ที่ซ่อนจากหน้าจอ login
    และถามรหัสผ่านของบัญชีนี้จากคุณ คำถามรหัสผ่านมาจาก `sysadminctl` ของ macOS เอง โดยแสดง `User password:`
    และถาม**ครั้งเดียว** ไม่มีการให้พิมพ์ยืนยันซ้ำ (จึงควรพิมพ์อย่างระมัดระวัง) และหน้าจอจะไม่แสดงสิ่งที่พิมพ์
@@ -272,6 +303,7 @@ sudo sh jodd-ai-host-install.sh
    **System Settings → General → Sharing** แล้วเปิด **Remote Login** เอง
    และรอจนคุณกด Enter
 5. ติดตั้ง `claude` และ `codex` ในนามบัญชี `jodd-ai` จากตัวติดตั้งทางการของแต่ละตัว
+   แล้วเปิดใช้ CLI ที่พบในนโยบาย ยกเว้นตัวที่คุณเคยปิดไว้
 6. ติดตั้ง `/usr/local/bin/jodd-ai-host` แล้วพิมพ์ที่อยู่, พอร์ต,
    ชื่อบัญชี และ fingerprint พร้อมรายชื่อโฟลเดอร์ home อื่นบน Mac
    ที่บัญชีอื่นยังเข้าได้ แต่ละรายการมีคำสั่ง `chmod 700` ที่ใช้ปิดโฟลเดอร์นั้น
@@ -313,7 +345,7 @@ sudo sh jodd-ai-host-install.sh
 sudo sh jodd-ai-host-install.sh --no-sleep
 ```
 
-`JODD_AI_USER` และ `JODD_AI_SKIP_CLIS=1` ทำงานเหมือนบน Linux แต่ `JODD_AI_PASSWORD`
+`JODD_AI_USER`, `JODD_AI_SKIP_CLIS=1` และ `JODD_AI_MCP_VERSION` ทำงานเหมือนบน Linux แต่ `JODD_AI_PASSWORD`
 ต่างออกไป: ใช้เฉพาะตอนที่ตัวติดตั้งสร้างบัญชีเท่านั้น และไม่เปลี่ยนรหัสผ่านของบัญชีที่มีอยู่แล้วเด็ดขาด (ถ้าจะเปลี่ยน ให้ใช้ `sudo jodd-ai-host password`)
 ควรพิมพ์รหัสผ่านตอนที่ตัวติดตั้งถาม มากกว่าใช้ `JODD_AI_PASSWORD`
 เพราะเครื่องมือจัดการบัญชีของ macOS รับค่านั้นผ่าน command line
@@ -325,9 +357,10 @@ sudo sh jodd-ai-host-install.sh --no-sleep
 ให้ทำขั้นตอนเดียวกันด้วยมือ ขั้นตอนเหล่านี้ทำซ้ำสิ่งที่ตัวติดตั้งทำ แต่ยังไม่ได้ทดสอบทั้งชุด คำสั่งด้านล่างสมมติว่ามี `sudo` ถ้าไม่มีให้ใช้ root โดยตรง
 
 เครื่อง host ต้องมี: OpenSSH server (ทดสอบแล้วกับ 9.2 ถึง 10.3 เวอร์ชันที่เก่ากว่าอาจใช้ได้
-แต่ยังไม่ได้ทดสอบ), `sh`, `bash`, `curl`, `base64`,
-`sha256sum` หรือ `shasum`, `mktemp`, `head` ที่รองรับ `-c` และ `setsid`
-(จาก util-linux)
+แต่ยังไม่ได้ทดสอบ), `sh`, `bash`, `curl`, `tar`, `sha256sum` หรือ `shasum`
+และ `mktemp` `jodd-ai-mcp` เป็นโปรแกรมแบบ static สำหรับ Linux บน x86_64 หรือ arm64
+Jodd รุ่นก่อนที่จะมี MCP client ยังต้องใช้ `base64`, `head` ที่รองรับ `-c` และ `setsid`
+(จาก util-linux) สำหรับตัวช่วยที่ Setup ของรุ่นนั้นติดตั้ง
 
 **1. สร้างบัญชี** โดยใช้ `bash` เป็น login shell:
 
@@ -416,22 +449,23 @@ sudo sshd -T -C user=jodd-ai,host=x,addr=127.0.0.1 | grep -i '^passwordauthentic
 **6. Reload sshd** ตามวิธีของระบบคุณ เช่น `sudo systemctl
 reload sshd`, `sudo rc-service sshd reload` หรือ `sudo service sshd reload`
 
-**7. ติดตั้งตัวช่วย (helper)**
+**7. ติดตั้งตัวช่วย (helper)** ใช้ release เดียวกับ `jodd-ai-mcp` ในขั้นที่ 8
+(ในตัวอย่างนี้ `v1.0.0`) ไม่ใช่จาก `main`
 
 ```sh
 sudo mkdir -p /usr/local/lib/jodd-ai-host
 ```
 
 ```sh
-sudo curl -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/main/bin/jodd-ai-host -o /usr/local/bin/jodd-ai-host
+sudo curl -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/v1.0.0/bin/jodd-ai-host -o /usr/local/bin/jodd-ai-host
 ```
 
 ```sh
-sudo curl -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/main/lib/dropin.sh -o /usr/local/lib/jodd-ai-host/dropin.sh
+sudo curl -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/v1.0.0/lib/dropin.sh -o /usr/local/lib/jodd-ai-host/dropin.sh
 ```
 
 ```sh
-sudo curl -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/main/lib/doctor.sh -o /usr/local/lib/jodd-ai-host/doctor.sh
+sudo curl -fsSL https://raw.githubusercontent.com/BBM-Co-ORG/jodd-ai-host/v1.0.0/lib/doctor.sh -o /usr/local/lib/jodd-ai-host/doctor.sh
 ```
 
 ```sh
@@ -450,7 +484,59 @@ JODD_AI_HOSTKEY=/etc/ssh/ssh_host_ed25519_key.pub
 JODD_AI_LIB=/usr/local/lib/jodd-ai-host
 ```
 
-**8. ตรวจทุกอย่าง:**
+**8. ติดตั้ง `jodd-ai-mcp`** เลือกไฟล์สำหรับเครื่องของคุณในหน้า
+[releases](https://github.com/BBM-Co-ORG/jodd-ai-host/releases/latest):
+`jodd-ai-mcp-<version>-x86_64-unknown-linux-musl.tar.gz` หรือ
+`jodd-ai-mcp-<version>-aarch64-unknown-linux-musl.tar.gz` พร้อมไฟล์ `.sha256`
+ที่อยู่คู่กัน ตัวอย่างสำหรับเวอร์ชัน 1.0.0 บน x86_64:
+
+```sh
+curl -fsSLO https://github.com/BBM-Co-ORG/jodd-ai-host/releases/download/v1.0.0/jodd-ai-mcp-1.0.0-x86_64-unknown-linux-musl.tar.gz
+```
+
+```sh
+curl -fsSLO https://github.com/BBM-Co-ORG/jodd-ai-host/releases/download/v1.0.0/jodd-ai-mcp-1.0.0-x86_64-unknown-linux-musl.tar.gz.sha256
+```
+
+คำสั่งนี้ต้องพิมพ์ `OK`:
+
+```sh
+sha256sum -c jodd-ai-mcp-1.0.0-x86_64-unknown-linux-musl.tar.gz.sha256
+```
+
+```sh
+tar -xzf jodd-ai-mcp-1.0.0-x86_64-unknown-linux-musl.tar.gz
+```
+
+```sh
+sudo install -o root -g root -m 0755 jodd-ai-mcp /usr/local/bin/jodd-ai-mcp
+```
+
+สร้างโฟลเดอร์นโยบายและนโยบายว่าง (ยังไม่เปิดใช้อะไร) และโฟลเดอร์ log ซึ่งเป็นของบัญชี:
+
+```sh
+sudo install -d -o root -g root -m 0755 /etc/jodd-ai-host
+```
+
+```sh
+sudo install -o root -g root -m 0644 /dev/null /etc/jodd-ai-host/policy.toml
+```
+
+```sh
+sudo install -d -o jodd-ai -m 0700 /var/log/jodd-ai-host
+```
+
+**9. เปิดใช้ CLI** ที่ติดตั้งไว้ในขั้นที่ 2:
+
+```sh
+sudo jodd-ai-host enable claude
+```
+
+```sh
+sudo jodd-ai-host enable codex
+```
+
+**10. ตรวจทุกอย่าง:**
 
 ```sh
 sudo jodd-ai-host doctor
@@ -480,6 +566,31 @@ sudo jodd-ai-host signin codex
 
 ใน Docker ให้ใช้ `docker compose exec ai-host jodd-ai-host signin claude` และ
 `docker compose exec ai-host jodd-ai-host signin codex`
+
+## <a id="choose-which-clis-jodd-may-run"></a>เลือก CLI ที่ Jodd รันได้
+
+นโยบายเป็นตัวกำหนดว่า Jodd รัน CLI ตัวใดได้ ตัวติดตั้งและ Docker image จะเปิดใช้
+CLI ที่พบ เว้นแต่คุณตัดสินใจไว้เป็นอย่างอื่น ดูว่าเปิดใช้ตัวใดอยู่:
+
+```sh
+jodd-ai-host list
+```
+
+ไม่ให้ Jodd รัน CLI ตัวหนึ่ง (ในตัวอย่างคือ Codex):
+
+```sh
+sudo jodd-ai-host disable codex
+```
+
+ให้รันได้อีกครั้ง คำสั่งนี้บันทึกด้วยว่า CLI อยู่ที่ไหน จึงควรรันอีกครั้งถ้าคุณติดตั้ง CLI ใหม่ไว้ที่อื่น:
+
+```sh
+sudo jodd-ai-host enable codex
+```
+
+การเปลี่ยนแปลงมีผลกับคำขอถัดไปของ Jodd การ `disable` ยังคงอยู่แม้รันตัวติดตั้งซ้ำ
+หรือ `docker compose pull` ใน Docker:
+`docker compose exec ai-host jodd-ai-host disable codex`
 
 ## <a id="connect-from-jodd"></a>เชื่อมต่อจาก Jodd
 
@@ -556,14 +667,22 @@ fingerprint จะคงเดิมเมื่อคุณรันตัว�
 
 ## <a id="harden"></a>เพิ่มความปลอดภัย
 
-**ปิดการเข้าสู่ระบบด้วยรหัสผ่านหลัง Setup** นับจากนั้น Jodd ใช้ key ของตัวเอง
+**หลัง Setup ใน Jodd ให้ชี้ key ของ Jodd ไปที่ `jodd-ai-mcp`** Jodd รุ่นก่อนที่จะมี
+MCP client จะติดตั้งตัวช่วยของตัวเองระหว่าง Setup และชี้ key ไปที่ตัวช่วยนั้น ซึ่งอยู่นอกนโยบาย
+คำสั่งนี้ชี้บรรทัดเหล่านั้นใหม่ รันซ้ำได้ทุกเมื่อ และ `jodd-ai-host doctor` จะบอกเมื่อต้องรัน:
+
+```sh
+sudo jodd-ai-host adopt-keys
+```
+
+**จากนั้นปิดการเข้าสู่ระบบด้วยรหัสผ่าน** นับจากนั้น Jodd ใช้ key ของตัวเอง
 และไม่ต้องใช้รหัสผ่านอีก:
 
 ```sh
 sudo jodd-ai-host lock
 ```
 
-ก่อนกด **Reinstall helper** ใน Jodd ให้เปิดกลับมาก่อน แล้วปิดอีกครั้งหลังเสร็จ:
+ก่อนกด **Reinstall helper** ใน Jodd ให้เปิดกลับมาก่อน หลังเสร็จให้รัน `adopt-keys` และ `lock` อีกครั้ง:
 
 ```sh
 sudo jodd-ai-host unlock
@@ -613,10 +732,15 @@ sudo jodd-ai-host update-clis
 docker compose exec ai-host jodd-ai-host update-clis
 ```
 
-ถ้า CLI ตัวใดยังไม่ได้ติดตั้งตอนที่คุณตั้งค่า Jodd ให้กด **Reinstall helper** ใน Jodd
-หลังติดตั้งแล้ว (โดยเปิดการเข้าสู่ระบบด้วยรหัสผ่านไว้) เพื่อให้ Jodd รู้ว่า CLI อยู่ที่ไหน
+ถ้า CLI ตัวใดเพิ่งติดตั้ง ให้เปิดใช้หลังติดตั้งเสร็จ เพื่อให้ Jodd รันได้:
 
-**ชุดติดตั้งบน Linux และ macOS** ดาวน์โหลดตัวติดตั้งใหม่แล้วรัน ตัวติดตั้งจะเก็บบัญชี รหัสผ่าน การลงชื่อเข้าใช้ของคุณ key ของ Jodd และสถานะ lock ไว้เหมือนเดิม
+```sh
+sudo jodd-ai-host enable codex
+```
+
+**เครื่อง host บน Linux และ macOS** ดาวน์โหลดตัวติดตั้งใหม่แล้วรัน ตัวติดตั้งจะติดตั้ง
+`jodd-ai-mcp` เวอร์ชันล่าสุด และเก็บบัญชี รหัสผ่าน การลงชื่อเข้าใช้ของคุณ key ของ Jodd
+นโยบาย และสถานะ lock ไว้เหมือนเดิม
 
 **Docker** จากโฟลเดอร์ที่มี `compose.yaml`:
 
@@ -632,7 +756,27 @@ fingerprint, CLI, การลงชื่อเข้าใช้ของค�
 รหัสผ่านจาก `.env` จะถูกนำไปใช้อีกครั้ง ถ้าไม่มี container ใหม่จะสร้างรหัสผ่านใหม่และแสดงใน `docker compose logs` ซึ่งคุณต้องใช้เฉพาะตอน
 Setup, Change server หรือ Reinstall helper ครั้งถัดไปใน Jodd
 
-**ส่วนของ Jodd บนเครื่อง host** เมื่อ Jodd บอกว่าเครื่อง host ต้องอัปเดต ให้เปิดการเข้าสู่ระบบด้วยรหัสผ่าน กด **Reinstall helper** ใน Jodd แล้ว lock อีกครั้ง
+**เครื่อง host ที่ตั้งไว้ก่อนเวอร์ชัน 1.0.0** หลังอัปเดตให้รันคำสั่งนี้หนึ่งครั้ง
+คำสั่งนี้ชี้ key เดิมของ Jodd ไปที่ `jodd-ai-mcp` ไม่ต้องทำอะไรใน Jodd และ Jodd
+ยังทำงานได้ระหว่างที่คุณรัน:
+
+```sh
+sudo jodd-ai-host adopt-keys
+```
+
+ใน Docker:
+
+```sh
+docker compose exec ai-host jodd-ai-host adopt-keys
+```
+
+จากนั้น `sudo jodd-ai-host doctor` (Docker: `docker compose exec ai-host
+jodd-ai-host doctor`) ไม่ควรแสดง key ที่ "still runs an older helper" อีก
+ไฟล์ตัวช่วยเดิมใน `~/.jodd/` ไม่ได้ใช้แล้ว จะลบทิ้งก็ได้
+
+**ส่วนของ Jodd บนเครื่อง host** ถ้า Jodd รุ่นเก่าบอกว่าเครื่อง host ต้องอัปเดต
+ให้เปิดการเข้าสู่ระบบด้วยรหัสผ่าน กด **Reinstall helper** ใน Jodd แล้วรัน
+`adopt-keys` และ `lock` อีกครั้ง
 
 ## <a id="remove-everything"></a>ลบทุกอย่างออก
 
@@ -657,11 +801,11 @@ sudo userdel -r jodd-ai
 (และ comment ที่อยู่เหนือบรรทัดนั้น) ไว้บนสุดของ `/etc/ssh/sshd_config` ให้ลบสองบรรทัดนั้นออก จากนั้นลบไฟล์ของชุดติดตั้ง:
 
 ```sh
-sudo rm -f /etc/ssh/sshd_config.d/50-jodd-ai.conf /etc/jodd-ai-host.conf /usr/local/bin/jodd-ai-host
+sudo rm -f /etc/ssh/sshd_config.d/50-jodd-ai.conf /etc/jodd-ai-host.conf /usr/local/bin/jodd-ai-host /usr/local/bin/jodd-ai-mcp
 ```
 
 ```sh
-sudo rm -rf /usr/local/lib/jodd-ai-host /var/lib/jodd-ai-host
+sudo rm -rf /usr/local/lib/jodd-ai-host /var/lib/jodd-ai-host /etc/jodd-ai-host /var/log/jodd-ai-host
 ```
 
 ตรวจการตั้งค่า SSH (ต้องไม่พิมพ์อะไรออกมา) แล้ว reload sshd ตาม[ขั้นที่ 6 ของ Linux อื่น ๆ](#other-linux):
@@ -691,7 +835,7 @@ sudo dseditgroup -o delete jodd-ai
 sudo jodd-ai-host doctor
 ```
 
-`status` แสดงสิ่งที่ Jodd จะพบ: บัญชี, พอร์ต, fingerprint, การเข้าสู่ระบบด้วยรหัสผ่านเปิดอยู่หรือไม่, CLI แต่ละตัวและเวอร์ชัน และจำนวน key ของ Jodd
+`status` แสดงสิ่งที่ Jodd จะพบ: บัญชี, พอร์ต, fingerprint, การเข้าสู่ระบบด้วยรหัสผ่านเปิดอยู่หรือไม่, CLI แต่ละตัวและเวอร์ชัน, จำนวน key ของ Jodd, เวอร์ชันของ `jodd-ai-mcp` และนโยบาย
 
 ```sh
 sudo jodd-ai-host status
@@ -702,7 +846,10 @@ sudo jodd-ai-host status
 
 | อาการ | สิ่งที่ต้องรัน |
 |---|---|
-| CLI แสดงว่า **not installed** ใน Jodd หรือ Jodd บอกว่ายังไม่ได้ติดตั้ง | `sudo jodd-ai-host update-clis` จากนั้น `unlock`, กด **Reinstall helper** ใน Jodd แล้ว `lock` |
+| CLI แสดงว่า **not installed** ใน Jodd หรือ Jodd บอกว่ายังไม่ได้ติดตั้ง | `sudo jodd-ai-host list` ถ้าไม่มีหรือยังไม่ได้ติดตั้ง: `sudo jodd-ai-host update-clis` จากนั้น `sudo jodd-ai-host enable claude` (หรือ `codex`) ถ้าแสดงว่า disabled: `sudo jodd-ai-host enable …` ถ้าต้องการให้ Jodd ใช้ |
+| Jodd บอกว่า CLI ยังไม่ได้เปิดใช้บนเครื่อง host นี้ | `sudo jodd-ai-host enable claude` (หรือ `codex`) |
+| doctor หรือ `status` บอกว่า key "still runs an older helper" หรือ "not on jodd-ai-mcp" | `sudo jodd-ai-host adopt-keys` |
+| doctor บอกว่ายังไม่ได้ติดตั้ง `jodd-ai-mcp` หรือนโยบายไม่ถูกต้อง | รันตัวติดตั้งซ้ำ (Docker: `docker compose pull` และ `docker compose up -d`) ส่วนนโยบาย ให้ทำตามบรรทัด `FIX` ของ doctor |
 | ติดตั้ง CLI ไม่สำเร็จ (ไม่มีอินเทอร์เน็ตระหว่างติดตั้ง) | `sudo jodd-ai-host update-clis` |
 | **Test connection** ใน Jodd บอกว่า Claude Code ยังไม่ได้ลงชื่อเข้าใช้ | `sudo jodd-ai-host signin claude` |
 | Codex ตอบกลับเป็นข้อผิดพลาดเรื่องการลงชื่อเข้าใช้หรือการอนุญาต | `sudo jodd-ai-host signin codex` |
