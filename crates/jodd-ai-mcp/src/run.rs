@@ -369,8 +369,9 @@ mod tests {
             cfg(&p.to_string_lossy())
         }
 
-        /// The fake CLI behind a launcher that sets `env`: `run` clears the
-        /// child's environment, so this is how a test's switches reach it.
+        /// The fake CLI behind a launcher that sets `env`: a test's switches
+        /// reach its own fake without touching the process-global environment
+        /// that parallel tests share.
         fn fake(&self, name: &str, env: &[(&str, &str)]) -> HarnessPolicy {
             let mut body = String::new();
             for (k, v) in env {
