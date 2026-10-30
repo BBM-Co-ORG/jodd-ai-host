@@ -219,7 +219,7 @@ async fn run_in(
 
 /// `[ -x "$bin" ]`, but stricter: absolute, a regular file (after symlinks),
 /// executable by us. A relative path is never looked up on any PATH.
-fn is_runnable(path: &str) -> bool {
+pub(crate) fn is_runnable(path: &str) -> bool {
     let p = Path::new(path);
     p.is_absolute()
         && fs::metadata(p).map(|m| m.is_file()).unwrap_or(false)
