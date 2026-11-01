@@ -33,9 +33,9 @@ still apply.
 
 These rows describe the kit **before 1.0.0**. The 1.0.0 installers (the
 `jodd-ai-mcp` download with its SHA-256 and version checks, the policy,
-`auto-enable`, `adopt-keys`) have **not yet been run end to end** on any of
-these Linux distributions or on a Mac. What has run for 1.0.0 is below the
-table.
+`auto-enable`, `adopt-keys`) have **not yet been run end to end** on a fresh
+machine with any of these Linux distributions or on a Mac. What has run for
+1.0.0, including one upgrade of an existing server, is below the table.
 
 | Path | Tested (before 1.0.0) | How |
 |---|---|---|
@@ -52,6 +52,13 @@ change: over real SSH with Jodd's restricted key, both protocols,
 checksum, version check) have unit tests. The end-to-end installer test for
 the four distributions (`test/e2e/linux.sh`) exists but has **not been run**
 for 1.0.0, and the macOS installer has not been run live with `jodd-ai-mcp`.
+
+One real installer run so far: on 2026-11-01 `install/linux.sh` upgraded an
+existing **Ubuntu 24.04 x86_64** server that had been set up before 1.0.0,
+followed by `sudo jodd-ai-host adopt-keys`. Jodd 0.42.0 then connected to it
+from a Mac and an Android phone, and Test connection worked. A fresh install,
+Debian, Fedora, Alpine and a Mac have still not been run with the 1.0.0
+installers.
 
 ## Before you start
 
