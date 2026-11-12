@@ -5,6 +5,22 @@ All notable changes to jodd-ai-host are recorded here. Versions follow
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-12
+
+### Added
+
+- `jodd-ai-host add-key '<type> <key> jodd-ai-<8 hex>'`: authorize a device's
+  public key with sudo, without password login. The kit writes the restricted
+  line (`restrict,command="/usr/local/bin/jodd-ai-mcp --key <id>"`) itself, as
+  `jodd-ai`; the key line travels on stdin. Running it again says the key is
+  already there; a legacy line for the same key is moved to `jodd-ai-mcp`; a
+  different key under the same id, options, or a malformed comment is refused.
+
+### Changed
+
+- `lock`, `unlock`, `status`, `doctor` and the installers no longer tell you to
+  unlock password login before Setup; they point at `add-key`.
+
 ## [1.0.0] - 2026-10-31
 
 The first release of the AI host as its own project. Jodd's keys now run a

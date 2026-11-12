@@ -727,8 +727,8 @@ need the password:
 sudo jodd-ai-host lock
 ```
 
-Before you press **Reinstall helper** in Jodd, turn it on again; after it,
-run `adopt-keys` and `lock` again:
+To add a device while it is off, use `add-key` (next section). Only if you
+would rather use the password, turn it on again for the Setup and `lock` after:
 
 ```sh
 sudo jodd-ai-host unlock
@@ -737,6 +737,28 @@ sudo jodd-ai-host unlock
 This affects the `jodd-ai` account only. In Docker:
 `docker compose exec ai-host jodd-ai-host lock` and
 `docker compose exec ai-host jodd-ai-host unlock`.
+
+### Add a device without the password
+
+With password login off, Jodd cannot add its key on its own. You add it:
+
+1. In Jodd, add the device and choose **Run a command on the host**. Jodd shows
+   one line: `<type> <key> jodd-ai-<8 hex>`.
+2. On the host, as an administrator:
+
+   ```sh
+   sudo jodd-ai-host add-key 'ssh-ed25519 AAAA... jodd-ai-1a2b3c4d'
+   ```
+
+3. Back in Jodd, continue. It signs in with its key.
+
+`add-key` takes only a bare public key and its `jodd-ai-<id>` comment; it
+refuses a line that carries options. The host writes the restricted line itself
+(`restrict,command="/usr/local/bin/jodd-ai-mcp --key <id>"`), as `jodd-ai`,
+never as root. Running it again for the same key says it is already there; the
+same id with a different key is refused, so `sudo jodd-ai-host revoke <id>`
+first. A global `AuthenticationMethods publickey` blocks password Setup but
+not `add-key`. In Docker: `docker compose exec ai-host jodd-ai-host add-key '...'`.
 
 **Firewall:** allow only the SSH port, and only from your own network or VPN
 if you can. In Docker, use `JODD_AI_BIND` instead ([Docker](#docker)).
@@ -827,8 +849,8 @@ jodd-ai-host doctor`) should list no key that "still runs an older helper".
 The old helper files in `~/.jodd/` are no longer used; you may delete them.
 
 **Jodd's part on the host.** If an older Jodd says the host needs an update,
-unlock password login, press **Reinstall helper** in Jodd, then run
-`adopt-keys` and `lock` again.
+add the new key with `add-key` (or unlock password login and press
+**Reinstall helper** in Jodd), then run `adopt-keys`.
 
 ## Remove everything
 

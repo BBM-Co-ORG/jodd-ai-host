@@ -261,6 +261,7 @@ $_o"
 #   lock | unlock          turn password login for the AI account off | on
 #   update-clis            reinstall / update both CLIs
 #   keys | revoke <id>     list Jodd's keys | remove one
+#   add-key '<line>'       authorize a device without the password: <type> <key> jodd-ai-<8 hex>
 #   list                   which CLIs the policy lets Jodd run, and their paths
 #   enable claude|codex    find the CLI as the AI account and let Jodd run it
 #   disable claude|codex   stop Jodd running it (kept across re-installs and image updates)
@@ -280,7 +281,7 @@ case $cmd in
     echo "port:       ${JODD_AI_PORT:-22}"
     fp=$(fingerprint) || die "cannot read the host key at $JODD_AI_HOSTKEY."
     echo "host key:   $fp"
-    if grep -q 'PasswordAuthentication yes' "$JODD_AI_DROPIN" 2>/dev/null; then echo "password:   on (Jodd can run Setup / Update)"; else echo "password:   off (run: sudo jodd-ai-host unlock, before Setup / Update)"; fi
+    if grep -q 'PasswordAuthentication yes' "$JODD_AI_DROPIN" 2>/dev/null; then echo "password:   on"; else echo "password:   off (add a device with: sudo jodd-ai-host add-key '<the line Jodd shows>')"; fi
     for c in claude codex; do p=$(cli_path "$c"); if [ -n "$p" ]; then echo "$c:  $p ($(cli_version "$c"))"; else echo "$c:  not installed (run: sudo jodd-ai-host update-clis)"; fi; done
     # The keys are read by jodd-ai-mcp AS THE ACCOUNT; root never opens the file.
     scan="" scan_ok=0
@@ -324,8 +325,8 @@ case $cmd in
       *) usage ;;
     esac ;;
   password) need_root; passwd "$U" ;;
-  lock)   need_root; write_dropin yes; echo "Password login for $U is off. Before Setup or Update in Jodd: sudo jodd-ai-host unlock" ;;
-  unlock) need_root; write_dropin no;  echo "Password login for $U is on. After Setup or Update in Jodd: sudo jodd-ai-host lock" ;;
+  lock)   need_root; write_dropin yes; echo "Password login for $U is off. To add a device, run in Jodd \"Run a command on the host\", then: sudo jodd-ai-host add-key '<the line Jodd shows>'" ;;
+  unlock) need_root; write_dropin no;  echo "Password login for $U is on. Turn it off again with: sudo jodd-ai-host lock (a device can still be added with: sudo jodd-ai-host add-key '<the line Jodd shows>')" ;;
   update-clis) need_root; install_clis ;;
   keys)
     # Read by jodd-ai-mcp as the account (root never opens the file); stdout only.
@@ -387,6 +388,14 @@ echo "Removed key jodd-ai-$id."'
   adopt-keys)
     need_root; need_mcp; need_home
     mcp_as_account adopt-keys ;;
+  add-key)
+    need_root
+    [ $# -eq 1 ] || { echo "usage: jodd-ai-host add-key '<type> <key> jodd-ai-<8 hex>'" >&2; exit 2; }
+    need_mcp; need_home
+    # The line goes to the binary on stdin, which every run_as_account branch (sh -c, sudo, su -c)
+    # passes on; it is never part of a shell-evaluated string. The binary validates it and
+    # composes the restricted line itself.
+    printf '%s\n' "$1" | mcp_as_account add-key ;;
   doctor) need_home; # shellcheck disable=SC1091
           . "$JODD_AI_LIB/doctor.sh"; doctor ;;
   *) usage ;;

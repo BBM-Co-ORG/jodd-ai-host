@@ -61,14 +61,14 @@ doctor() {
     _dump=$(sshd_effective 2>/dev/null)
     _eff=$(printf '%s\n' "$_dump" | awk '$1 == "passwordauthentication" { print $2 }')
     if [ "$_locked" = yes ]; then
-      _d_note "password login for $U is locked (off); unlock it before Setup or Update in Jodd: sudo jodd-ai-host unlock"
+      _d_note "password login for $U is locked (off); add a device with: sudo jodd-ai-host add-key '<the line Jodd shows>'"
     elif [ "$_eff" = yes ]; then
       _d_ok "sshd allows password login for $U"
     else
       _d_fix "sshd does not allow password login for $U (effective: ${_eff:-unknown}). The drop-in may not be included by sshd_config (needs 'Include /etc/ssh/sshd_config.d/*.conf')."
     fi
   elif [ "$_locked" = yes ]; then
-    _d_note "password login for $U is locked (off); unlock it before Setup or Update in Jodd: sudo jodd-ai-host unlock"
+    _d_note "password login for $U is locked (off); add a device with: sudo jodd-ai-host add-key '<the line Jodd shows>'"
   else
     _d_note "the effective sshd setting needs root (sshd -T); run: sudo jodd-ai-host doctor"
   fi

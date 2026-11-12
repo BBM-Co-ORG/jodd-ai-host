@@ -431,7 +431,7 @@ problems=$(printf '%s\n' "$eff" | sshd_login_problems "$user" "$(id -Gn "$user" 
 if [ -n "$problems" ]; then
   warn "WARNING: another sshd setting keeps $user out, and the installer leaves it alone (it is yours):"
   printf '%s\n' "$problems" | sed 's/^/    - /' >&2
-  warn "Jodd's Setup fails until it is changed. Then check with: sudo jodd-ai-host doctor"
+  warn "Jodd's password Setup fails until it is changed; adding a device with 'sudo jodd-ai-host add-key' works regardless. Then check with: sudo jodd-ai-host doctor"
 fi
 
 # ---------------------------------------------------------------- helper config ---------
@@ -534,13 +534,14 @@ Next:
   2. In Jodd: App settings -> LLM provider -> Agent CLI (headless) -> Runs on: A server
      (or Account settings -> LLM Provider, for one account's own provider).
      Enter the host, port $shown_port, user $user and the password; confirm the fingerprint.
-  3. After Setup:  sudo jodd-ai-host lock     (before an Update in Jodd:  sudo jodd-ai-host unlock)
+  3. After Setup:  sudo jodd-ai-host lock
+     (to add a device later without the password:  sudo jodd-ai-host add-key '<the line Jodd shows>')
   Upgrading a host Jodd already uses? Run once:  sudo jodd-ai-host adopt-keys
   (doctor, above, warns about every key that still needs it). Which CLIs Jodd may run: jodd-ai-host list
 EOS
 if [ "$locked" = yes ]; then
   echo
-  echo "Password login for $user is LOCKED (kept from before). Before Setup in Jodd: sudo jodd-ai-host unlock"
+  echo "Password login for $user is LOCKED (kept from before). To add a device: sudo jodd-ai-host add-key '<the line Jodd shows>'"
 fi
 if [ "$cli_ok" = 0 ]; then
   echo

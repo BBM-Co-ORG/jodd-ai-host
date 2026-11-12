@@ -166,12 +166,26 @@ sudo jodd-ai-host adopt-keys
 `doctor` list every Jodd key that does not run `jodd-ai-mcp`. You can run
 `adopt-keys` as often as you like.
 
-**Run `sudo jodd-ai-host lock` after Setup.** Jodd needs the password only
-during Setup, Change server and Reinstall helper, so turn password login off in
-between. `lock` sets `PasswordAuthentication no` for the `jodd-ai` account only
-and reloads sshd; open sessions stay up. Before the next Setup, run
-`sudo jodd-ai-host unlock`, and `lock` again after. While locked, an older
-Jodd's **Reinstall helper** cannot point its line back at its own helper.
+**Run `sudo jodd-ai-host lock` after Setup.** Jodd needs the password only to
+add its key, so turn password login off in between. `lock` sets
+`PasswordAuthentication no` for the `jodd-ai` account only and reloads sshd;
+open sessions stay up. To add a device while it is locked, use `add-key` (below)
+instead of unlocking. While locked, an older Jodd's **Reinstall helper** cannot
+point its line back at its own helper.
+
+## Add a device without the password
+
+`sudo jodd-ai-host add-key '<type> <key> jodd-ai-<8 hex>'` authorizes one
+device key with no password login at all. Jodd shows the line; you run the
+command as an administrator. The kit, not Jodd, writes the restricted line:
+`restrict,command="/usr/local/bin/jodd-ai-mcp --key <id>" <type> <key> jodd-ai-<id>`,
+byte for byte what Jodd's own Setup writes. The public key arrives on the
+binary's stdin, never inside a shell command, and `jodd-ai-mcp` writes it as
+`jodd-ai`, not as root, with the same checks as `revoke` and `adopt-keys` (no
+symlinks, the account owns the file, an atomic replace). A line with options, a
+comment that is not `jodd-ai-<8 hex>`, or a different key under an id already in
+use is refused and nothing changes. The key is only a public key: it grants
+what any Jodd key grants, `restrict` and the forced command included.
 
 ## What the key can do, and what it cannot stop
 
