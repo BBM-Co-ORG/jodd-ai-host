@@ -687,7 +687,8 @@ sudo jodd-ai-host adopt-keys
 sudo jodd-ai-host lock
 ```
 
-ก่อนกด **Reinstall helper** ใน Jodd ให้เปิดกลับมาก่อน หลังเสร็จให้รัน `adopt-keys` และ `lock` อีกครั้ง:
+ถ้าจะเพิ่มอุปกรณ์ระหว่างที่ปิดอยู่ ให้ใช้ `add-key` (หัวข้อถัดไป) ถ้าอยากใช้รหัสผ่านมากกว่า
+ให้เปิดกลับมาเฉพาะช่วง Setup แล้ว `lock` อีกครั้งหลังเสร็จ:
 
 ```sh
 sudo jodd-ai-host unlock
@@ -696,6 +697,28 @@ sudo jodd-ai-host unlock
 ทั้ง `lock` และ `unlock` มีผลเฉพาะบัญชี `jodd-ai` เท่านั้น ใน Docker:
 `docker compose exec ai-host jodd-ai-host lock` และ
 `docker compose exec ai-host jodd-ai-host unlock`
+
+### <a id="add-a-device-without-the-password"></a>เพิ่มอุปกรณ์โดยไม่ใช้รหัสผ่าน
+
+เมื่อปิดการเข้าสู่ระบบด้วยรหัสผ่านแล้ว Jodd จะเพิ่ม key ของตัวเองไม่ได้ คุณเป็นคนเพิ่มให้:
+
+1. ใน Jodd เพิ่มอุปกรณ์แล้วเลือก **Run a command on the host** Jodd จะแสดงหนึ่งบรรทัด:
+   `<type> <key> jodd-ai-<8 hex>`
+2. บนเครื่อง host ในฐานะผู้ดูแลระบบ:
+
+   ```sh
+   sudo jodd-ai-host add-key 'ssh-ed25519 AAAA... jodd-ai-1a2b3c4d'
+   ```
+
+3. กลับไปที่ Jodd แล้วทำต่อ Jodd จะลงชื่อเข้าใช้ด้วย key ของตัวเอง
+
+`add-key` รับเฉพาะ public key เปล่า ๆ กับ comment `jodd-ai-<id>` ของมัน และปฏิเสธบรรทัดที่มี
+option เครื่อง host เขียนบรรทัดแบบจำกัดสิทธิ์เอง
+(`restrict,command="/usr/local/bin/jodd-ai-mcp --key <id>"`) ในฐานะ `jodd-ai`
+ไม่ใช่ root การรันซ้ำกับ key เดิมจะบอกว่ามีอยู่แล้ว ส่วน id เดิมที่มี key ต่างกันจะถูกปฏิเสธ
+ให้รัน `sudo jodd-ai-host revoke <id>` ก่อน ค่า `AuthenticationMethods publickey` ที่ใช้กับทุกบัญชี
+จะกัน Setup ด้วยรหัสผ่าน แต่ไม่กัน `add-key` ใน Docker:
+`docker compose exec ai-host jodd-ai-host add-key '...'`
 
 **Firewall:** อนุญาตเฉพาะพอร์ต SSH และถ้าทำได้ ให้อนุญาตเฉพาะจากเครือข่ายหรือ VPN
 ของคุณเอง ใน Docker ให้ใช้ `JODD_AI_BIND` แทน ([Docker](#docker))
@@ -780,8 +803,8 @@ jodd-ai-host doctor`) ไม่ควรแสดง key ที่ "still runs a
 ไฟล์ตัวช่วยเดิมใน `~/.jodd/` ไม่ได้ใช้แล้ว จะลบทิ้งก็ได้
 
 **ส่วนของ Jodd บนเครื่อง host** ถ้า Jodd รุ่นเก่าบอกว่าเครื่อง host ต้องอัปเดต
-ให้เปิดการเข้าสู่ระบบด้วยรหัสผ่าน กด **Reinstall helper** ใน Jodd แล้วรัน
-`adopt-keys` และ `lock` อีกครั้ง
+ให้เพิ่ม key ใหม่ด้วย `add-key` (หรือเปิดการเข้าสู่ระบบด้วยรหัสผ่านแล้วกด
+**Reinstall helper** ใน Jodd) จากนั้นรัน `adopt-keys`
 
 ## <a id="remove-everything"></a>ลบทุกอย่างออก
 
@@ -858,7 +881,7 @@ sudo jodd-ai-host status
 | ติดตั้ง CLI ไม่สำเร็จ (ไม่มีอินเทอร์เน็ตระหว่างติดตั้ง) | `sudo jodd-ai-host update-clis` |
 | **Test connection** ใน Jodd บอกว่า Claude Code ยังไม่ได้ลงชื่อเข้าใช้ | `sudo jodd-ai-host signin claude` |
 | Codex ตอบกลับเป็นข้อผิดพลาดเรื่องการลงชื่อเข้าใช้หรือการอนุญาต | `sudo jodd-ai-host signin codex` |
-| Jodd บอกว่าเซิร์ฟเวอร์ไม่รับการลงชื่อเข้าใช้ด้วยรหัสผ่าน | การเข้าสู่ระบบด้วยรหัสผ่านถูก lock อยู่: `sudo jodd-ai-host unlock` (lock อีกครั้งหลัง Setup, Change server หรือ Reinstall helper) ถ้าไม่ได้ lock ไว้ `/etc/ssh/sshd_config` อาจมี `AuthenticationMethods publickey` ที่ใช้กับทุกบัญชี: `sudo jodd-ai-host doctor` จะบอกชื่อค่าที่ต้องแก้ |
+| Jodd บอกว่าเซิร์ฟเวอร์ไม่รับการลงชื่อเข้าใช้ด้วยรหัสผ่าน | การเข้าสู่ระบบด้วยรหัสผ่านถูก lock อยู่: ใน Jodd เลือก **Run a command on the host** แล้วรัน `sudo jodd-ai-host add-key '...'` ([เพิ่มอุปกรณ์โดยไม่ใช้รหัสผ่าน](#add-a-device-without-the-password)) หรือ `sudo jodd-ai-host unlock` (lock อีกครั้งหลัง Setup, Change server หรือ Reinstall helper) ถ้าไม่ได้ lock ไว้ `/etc/ssh/sshd_config` อาจมี `AuthenticationMethods publickey` ที่ใช้กับทุกบัญชี: `sudo jodd-ai-host doctor` จะบอกชื่อค่าที่ต้องแก้ |
 | Jodd บอกว่าเซิร์ฟเวอร์ปฏิเสธชื่อผู้ใช้หรือรหัสผ่าน | ตรวจว่าชื่อผู้ใช้คือ `jodd-ai` และตั้งรหัสผ่านใหม่ด้วย `sudo jodd-ai-host password` ถ้ารหัสผ่านถูกต้อง `AllowUsers` หรือ `AllowGroups` ของ sshd อาจไม่รวม `jodd-ai`: `sudo jodd-ai-host doctor` จะบอกชื่อค่าที่ต้องแก้ |
 | doctor หรือตัวติดตั้งระบุชื่อ `AuthenticationMethods`, `AllowUsers`, `AllowGroups`, `DenyUsers` หรือ `DenyGroups` | แก้ค่านั้นใน `/etc/ssh/sshd_config` ด้วยตัวเองตามที่บรรทัดนั้นบอก ชุดติดตั้งไม่เคยเปลี่ยนค่าเหล่านี้ เพราะมีผลกับทุกบัญชี จากนั้นรัน `sudo jodd-ai-host doctor` อีกครั้ง |
 | ลืมรหัสผ่านของ Docker | `docker compose exec ai-host jodd-ai-host password` |

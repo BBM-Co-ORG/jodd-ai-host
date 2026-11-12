@@ -37,6 +37,9 @@ check first on a VPS or any machine reachable from the internet.
 2. In Jodd: **App settings** → **LLM provider** → **Agent CLI (headless)** →
    **Runs on: A server**. Check the fingerprint against `jodd-ai-host fingerprint`.
 3. After Setup: `sudo jodd-ai-host adopt-keys`, then `sudo jodd-ai-host lock`.
+4. To add another device later, no unlock needed (kit 1.1.0+): in Jodd choose
+   **Run a command on the host**, then run the line it shows,
+   `sudo jodd-ai-host add-key '…'`, on the host.
 
 In Docker, drop `sudo` and put `docker compose exec ai-host` in front.
 **Upgrading a host set up before 1.0.0:** download the installer again and run it (or
