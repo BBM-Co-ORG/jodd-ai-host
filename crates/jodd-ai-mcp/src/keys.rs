@@ -342,7 +342,7 @@ fn add_in(home: &Path, uid: u32, mcp_path: &str, line: &str) -> io::Result<Added
 
     // Classify every existing line for this id.
     let mut out = Vec::with_capacity(file.bytes.len() + new.len() + 2);
-    let mut replaced = false;
+    let (mut replaced, mut exact) = (false, false);
     for l in lines(&file.bytes) {
         let (text, end) = split_end(l);
         let existing = (trailing_id(text) == Some(id))
@@ -361,9 +361,14 @@ fn add_in(home: &Path, uid: u32, mcp_path: &str, line: &str) -> io::Result<Added
                 ),
             ));
         }
-        if e.command.as_deref().is_some_and(is_mcp_command) {
-            return Ok(Added::AlreadyThere);
+        if text == new.as_bytes() {
+            // Exactly the kit's line (ignoring the line ending): keep it.
+            exact = true;
+            out.extend_from_slice(l);
+            continue;
         }
+        // Same key on any other line - a legacy wrapper, a bare jodd-ai-mcp
+        // program without `restrict`, another id's `--key` - is rewritten.
         out.extend_from_slice(new.as_bytes());
         out.extend_from_slice(end);
         replaced = true;
@@ -371,6 +376,9 @@ fn add_in(home: &Path, uid: u32, mcp_path: &str, line: &str) -> io::Result<Added
     if replaced {
         file.replace(&out)?;
         return Ok(Added::Adopted);
+    }
+    if exact {
+        return Ok(Added::AlreadyThere);
     }
     if !out.is_empty() && !out.ends_with(b"\n") {
         out.push(b'\n');
@@ -1217,6 +1225,40 @@ mod tests {
         let e = add_in(home.path(), uid(), MCP, &input("11111111")).unwrap_err();
         assert!(e.to_string().contains("symlink"), "{e}");
         assert_eq!(fs::read_dir(elsewhere.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn add_rewrites_a_jodd_ai_mcp_line_that_is_not_the_kits() {
+        // Same program name is not the kit's line: wrong --key, or no restrict.
+        for (label, old) in [
+            (
+                "mismatched --key",
+                format!("restrict,command=\"{MCP} --key 99999999\" ssh-ed25519 {BODY} jodd-ai-11111111"),
+            ),
+            (
+                "no restrict",
+                format!("command=\"{MCP} --key 11111111\" ssh-ed25519 {BODY} jodd-ai-11111111"),
+            ),
+            (
+                "pty allowed",
+                format!("restrict,pty,command=\"{MCP} --key 11111111\" ssh-ed25519 {BODY} jodd-ai-11111111"),
+            ),
+        ] {
+            let h = Home::new();
+            h.write(format!("{OTHER}\n{old}\n").as_bytes());
+            assert_eq!(
+                add_in(h.path(), uid(), MCP, &input("11111111")).unwrap(),
+                Added::Adopted,
+                "{label}"
+            );
+            assert_eq!(
+                s(&h.read()),
+                format!(
+                    "{OTHER}\nrestrict,command=\"{MCP} --key 11111111\" ssh-ed25519 {BODY} jodd-ai-11111111\n"
+                ),
+                "{label}"
+            );
+        }
     }
 
     #[test]
