@@ -32,7 +32,7 @@ sshd_login_problems() {
         # the space-separated lists must be `password` on its own; `any` is sshd's default.
         _pwok=0
         for _l in $_v; do case $_l in any|password|password:*) _pwok=1 ;; esac; done
-        [ "$_pwok" = 1 ] || echo "AuthenticationMethods is '$_v' for $_lu, so sshd refuses a password on its own and Jodd's Setup cannot sign in. Edit AuthenticationMethods in sshd_config so $_lu may use 'password' alone (e.g. a 'Match User $_lu' block of your own with 'AuthenticationMethods password')." ;;
+        [ "$_pwok" = 1 ] || echo "AuthenticationMethods is '$_v' for $_lu, so sshd refuses a password on its own and Jodd's password Setup cannot sign in (adding a device with 'sudo jodd-ai-host add-key' still works). To allow the password, edit AuthenticationMethods in sshd_config so $_lu may use 'password' alone (e.g. a 'Match User $_lu' block of your own with 'AuthenticationMethods password')." ;;
       denyusers)
         if _sshd_pat_match "$_lu" "${_v%%@*}"; then
           case $_v in

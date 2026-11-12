@@ -727,8 +727,8 @@ need the password:
 sudo jodd-ai-host lock
 ```
 
-Before you press **Reinstall helper** in Jodd, turn it on again; after it,
-run `adopt-keys` and `lock` again:
+To add a device while it is off, use `add-key` (next section). Only if you
+would rather use the password, turn it on again for the Setup and `lock` after:
 
 ```sh
 sudo jodd-ai-host unlock
@@ -737,6 +737,28 @@ sudo jodd-ai-host unlock
 This affects the `jodd-ai` account only. In Docker:
 `docker compose exec ai-host jodd-ai-host lock` and
 `docker compose exec ai-host jodd-ai-host unlock`.
+
+### Add a device without the password
+
+With password login off, Jodd cannot add its key on its own. You add it:
+
+1. In Jodd, add the device and choose **Run a command on the host**. Jodd shows
+   one line: `<type> <key> jodd-ai-<8 hex>`.
+2. On the host, as an administrator:
+
+   ```sh
+   sudo jodd-ai-host add-key 'ssh-ed25519 AAAA... jodd-ai-1a2b3c4d'
+   ```
+
+3. Back in Jodd, continue. It signs in with its key.
+
+`add-key` takes only a bare public key and its `jodd-ai-<id>` comment; it
+refuses a line that carries options. The host writes the restricted line itself
+(`restrict,command="/usr/local/bin/jodd-ai-mcp --key <id>"`), as `jodd-ai`,
+never as root. Running it again for the same key says it is already there; the
+same id with a different key is refused, so `sudo jodd-ai-host revoke <id>`
+first. A global `AuthenticationMethods publickey` blocks password Setup but
+not `add-key`. In Docker: `docker compose exec ai-host jodd-ai-host add-key '...'`.
 
 **Firewall:** allow only the SSH port, and only from your own network or VPN
 if you can. In Docker, use `JODD_AI_BIND` instead ([Docker](#docker)).
@@ -827,8 +849,8 @@ jodd-ai-host doctor`) should list no key that "still runs an older helper".
 The old helper files in `~/.jodd/` are no longer used; you may delete them.
 
 **Jodd's part on the host.** If an older Jodd says the host needs an update,
-unlock password login, press **Reinstall helper** in Jodd, then run
-`adopt-keys` and `lock` again.
+add the new key with `add-key` (or unlock password login and press
+**Reinstall helper** in Jodd), then run `adopt-keys`.
 
 ## Remove everything
 
@@ -910,7 +932,7 @@ In Docker, run these and every command below as
 | The CLI install failed (no internet during install) | `sudo jodd-ai-host update-clis` |
 | Jodd's **Test connection** says Claude Code is not signed in | `sudo jodd-ai-host signin claude` |
 | Codex answers with a sign-in or authorization error | `sudo jodd-ai-host signin codex` |
-| Jodd says the server does not accept password sign-in | Password login is locked: `sudo jodd-ai-host unlock` (lock again after Setup, Change server or Reinstall helper). If it was not locked, `/etc/ssh/sshd_config` may have a global `AuthenticationMethods publickey`: `sudo jodd-ai-host doctor` names the setting to change |
+| Jodd says the server does not accept password sign-in | Password login is locked: in Jodd choose **Run a command on the host** and run `sudo jodd-ai-host add-key '...'` ([Add a device without the password](#add-a-device-without-the-password)), or `sudo jodd-ai-host unlock` (lock again after Setup, Change server or Reinstall helper). If it was not locked, `/etc/ssh/sshd_config` may have a global `AuthenticationMethods publickey`: `sudo jodd-ai-host doctor` names the setting to change |
 | Jodd says the server rejected the username or password | Check the username is `jodd-ai`; set a new password with `sudo jodd-ai-host password`. If the password is right, sshd's `AllowUsers` or `AllowGroups` may leave `jodd-ai` out: `sudo jodd-ai-host doctor` names the setting to change |
 | The doctor or the installer names `AuthenticationMethods`, `AllowUsers`, `AllowGroups`, `DenyUsers` or `DenyGroups` | Change that setting in `/etc/ssh/sshd_config` yourself, as the line says. The kit never changes these settings; they apply to every account. Then `sudo jodd-ai-host doctor` again |
 | You lost the Docker password | `docker compose exec ai-host jodd-ai-host password` |

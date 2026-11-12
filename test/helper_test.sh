@@ -425,6 +425,45 @@ has "adopt-keys names the symlink" "$out" 'symlink'
 if cmp -s "$t/secret.before" "$t/secret" && [ -L "$t/ahome2/.ssh/authorized_keys" ]; then ok; else bad "adopt-keys changed the symlink or its target"; fi
 hasnt "adopt-keys on a link: still never outside su" "$(cat "$t/mcp.calls")" '^NOT-under-su'
 
+# add-key: the line travels on stdin to `admin add-key`, run as the account; the kit composes
+# the restricted line, and a refused line changes nothing.
+mkdir -p "$t/ahome3"
+sed "s|^JODD_AI_HOME=.*|JODD_AI_HOME=$t/ahome3|" "$t/conf-a" > "$t/conf-a3"
+ak() { env JODD_AI_SU="$t/stubsu" JODD_AI_HOST_CONF="$t/conf-a3" JODD_AI_MCP_BIN="$t/mcpwrap" JODD_AI_MCP_SELF_PATH=/usr/local/bin/jodd-ai-mcp sh "$H" "$@"; }
+: > "$t/mcp.calls"
+out=$(ak add-key 2>&1); rc=$?
+check "add-key without an argument (rc)" "$rc" "2"
+has "add-key without an argument prints usage" "$out" 'add-key'
+out=$(ak add-key a b 2>&1); rc=$?
+check "add-key with two arguments (rc)" "$rc" "2"
+out=$(ak add-key "ssh-ed25519 $KEYA jodd-ai-99999999" 2>&1); rc=$?
+check "add-key with a valid line (rc)" "$rc" "0"
+has "add-key says it added the key" "$out" '^Added key jodd-ai-99999999\.$'
+has "add-key ran under su" "$(cat "$t/mcp.calls")" '^under-su admin add-key$'
+hasnt "add-key never ran outside su" "$(cat "$t/mcp.calls")" '^NOT-under-su'
+infile "add-key wrote the kit's line" "$t/ahome3/.ssh/authorized_keys" "restrict,command=\"/usr/local/bin/jodd-ai-mcp --key 99999999\" ssh-ed25519 $KEYA jodd-ai-99999999"
+check "keys lists the new key" "$(ak keys 2>&1)" "jodd-ai-99999999"
+out=$(ak add-key "ssh-ed25519 $KEYA jodd-ai-99999999" 2>&1); rc=$?
+check "add-key again (rc)" "$rc" "0"
+has "add-key again says already there" "$out" 'already there'
+cp -p "$t/ahome3/.ssh/authorized_keys" "$t/ak3.before"
+out=$(ak add-key "restrict ssh-ed25519 $KEYA jodd-ai-11111111" 2>&1); rc=$?
+check "add-key with options (rc)" "$rc" "1"
+has "add-key with options prints usage" "$out" 'usage: jodd-ai-host add-key'
+if cmp -s "$t/ak3.before" "$t/ahome3/.ssh/authorized_keys"; then ok; else bad "a refused add-key changed the file"; fi
+out=$(ak add-key "ssh-ed25519 \$(touch $t/pwned) jodd-ai-12121212" 2>&1); rc=$?
+check "add-key never evaluates the line" "$(ls "$t/pwned" 2>/dev/null)" ""
+
+# lock / unlock no longer tell the admin to unlock for Setup: add-key is the way in
+out=$(sh "$H" lock 2>&1)
+hasnt "lock no longer says Setup needs the password" "$out" 'Before Setup or Update in Jodd: sudo jodd-ai-host unlock'
+has "lock points at add-key" "$out" 'add-key'
+out=$(sh "$H" unlock 2>&1)
+hasnt "unlock no longer says to lock after Setup" "$out" 'After Setup or Update in Jodd'
+has "unlock points at add-key" "$out" 'add-key'
+out=$(sh "$H" status 2>&1)
+hasnt "status no longer says to unlock before Setup" "$out" 'before Setup / Update'
+
 # keys_and_status_read_keys_as_account (R28): `keys` and status's key count come from
 # `jodd-ai-mcp admin scan-keys` run as the account through su; root never opens the file.
 # (status also probes the CLIs through the real `su -l`: a failing `su` first on PATH stands in,
