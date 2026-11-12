@@ -13,7 +13,9 @@ All notable changes to jodd-ai-host are recorded here. Versions follow
   public key with sudo, without password login. The kit writes the restricted
   line (`restrict,command="/usr/local/bin/jodd-ai-mcp --key <id>"`) itself, as
   `jodd-ai`; the key line travels on stdin. Running it again says the key is
-  already there; a legacy line for the same key is moved to `jodd-ai-mcp`; a
+  already there; a legacy line for the same key is moved to `jodd-ai-mcp`, and
+  any other line for it is rewritten to the kit's line, keeping narrowing
+  options such as `from=` and `expiry-time=`; a
   different key under the same id, options, or a malformed comment is refused.
 
 ### Changed

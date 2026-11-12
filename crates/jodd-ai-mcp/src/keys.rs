@@ -325,10 +325,7 @@ fn add_in(home: &Path, uid: u32, mcp_path: &str, line: &str) -> io::Result<Added
     if !p.options.is_empty() || !is_key_type(p.key_type) {
         return Err(bad());
     }
-    let new = format!(
-        "restrict,command=\"{mcp_path} --key {id}\" {} {} jodd-ai-{id}",
-        p.key_type, p.key_body
-    );
+    let new = kit_line(mcp_path, id, &[], p.key_type, p.key_body);
 
     let file = match read_keys(home, uid)? {
         Some(f) => f,
@@ -361,15 +358,22 @@ fn add_in(home: &Path, uid: u32, mcp_path: &str, line: &str) -> io::Result<Added
                 ),
             ));
         }
-        if text == new.as_bytes() {
-            // Exactly the kit's line (ignoring the line ending): keep it.
+        // The kit's line, keeping only the narrowing options the admin added
+        // (`from=`, `expiry-time=`, ...); anything that widens is dropped.
+        let keep: Vec<&str> = extra_options(e.options)
+            .filter(|o| is_narrowing(o))
+            .collect();
+        let want = kit_line(mcp_path, id, &keep, p.key_type, p.key_body);
+        if text == want.as_bytes() {
+            // Already the kit's line (ignoring the line ending): keep it.
             exact = true;
             out.extend_from_slice(l);
             continue;
         }
         // Same key on any other line - a legacy wrapper, a bare jodd-ai-mcp
-        // program without `restrict`, another id's `--key` - is rewritten.
-        out.extend_from_slice(new.as_bytes());
+        // program without `restrict`, another id's `--key`, a different
+        // command, a widening option - is rewritten.
+        out.extend_from_slice(want.as_bytes());
         out.extend_from_slice(end);
         replaced = true;
     }
@@ -451,18 +455,33 @@ fn adopted(text: &[u8], mcp_path: &str) -> Option<String> {
     if p.comment != format!("jodd-ai-{id}") || !is_legacy_command(p.command.as_deref()?) {
         return None;
     }
+    let keep: Vec<&str> = extra_options(p.options).collect();
+    if !keep.iter().all(|o| is_narrowing(o)) {
+        return None;
+    }
+    Some(kit_line(mcp_path, id, &keep, p.key_type, p.key_body))
+}
+
+/// The options a line carries besides `restrict` and its `command=`.
+fn extra_options(options: &str) -> impl Iterator<Item = &str> {
+    split_options(options).filter(|o| !o.eq_ignore_ascii_case("restrict") && !is_command_option(o))
+}
+
+/// `restrict,command="<mcp> --key <id>"`, then `narrowing` (only options
+/// [`is_narrowing`] accepts), then the key, commented `jodd-ai-<id>`.
+fn kit_line(
+    mcp_path: &str,
+    id: &str,
+    narrowing: &[&str],
+    key_type: &str,
+    key_body: &str,
+) -> String {
     let mut opts = format!("restrict,command=\"{mcp_path} --key {id}\"");
-    for o in split_options(p.options) {
-        if o.eq_ignore_ascii_case("restrict") || is_command_option(o) {
-            continue;
-        }
-        if !is_narrowing(o) {
-            return None;
-        }
+    for o in narrowing {
         opts.push(',');
         opts.push_str(o);
     }
-    Some(format!("{opts} {} {} jodd-ai-{id}", p.key_type, p.key_body))
+    format!("{opts} {key_type} {key_body} jodd-ai-{id}")
 }
 
 /// An option that only ever takes rights away.
@@ -1259,6 +1278,78 @@ mod tests {
                 "{label}"
             );
         }
+    }
+
+    /// The kit's line for `11111111` with `extra` after its command.
+    fn kit_line_with(extra: &str) -> String {
+        format!(
+            "restrict,command=\"{MCP} --key 11111111\"{extra} ssh-ed25519 {BODY} jodd-ai-11111111"
+        )
+    }
+
+    #[test]
+    fn add_keeps_from_on_rewrite() {
+        let h = Home::new();
+        let old = format!(
+            "from=\"10.0.0.0/8\",command=\"{MCP} --key 99999999\" ssh-ed25519 {BODY} jodd-ai-11111111"
+        );
+        h.write(format!("{OTHER}\n{old}\n").as_bytes());
+        assert_eq!(
+            add_in(h.path(), uid(), MCP, &input("11111111")).unwrap(),
+            Added::Adopted
+        );
+        assert_eq!(
+            s(&h.read()),
+            format!("{OTHER}\n{}\n", kit_line_with(",from=\"10.0.0.0/8\""))
+        );
+    }
+
+    #[test]
+    fn add_keeps_expiry_time_and_drops_a_widening_option_on_rewrite() {
+        let h = Home::new();
+        let old = format!(
+            "restrict,pty,expiry-time=\"20991231\",command=\"{MCP} --key 11111111\" \
+             ssh-ed25519 {BODY} jodd-ai-11111111"
+        );
+        h.write(format!("{old}\n").as_bytes());
+        assert_eq!(
+            add_in(h.path(), uid(), MCP, &input("11111111")).unwrap(),
+            Added::Adopted
+        );
+        assert_eq!(
+            s(&h.read()),
+            format!("{}\n", kit_line_with(",expiry-time=\"20991231\""))
+        );
+    }
+
+    #[test]
+    fn add_leaves_the_kits_line_with_narrowing_extras_alone() {
+        let h = Home::new();
+        let line = kit_line_with(",from=\"192.168.1.0/24\"");
+        h.write(format!("{OTHER}\n{line}\n").as_bytes());
+        let before = h.read();
+        assert_eq!(
+            add_in(h.path(), uid(), MCP, &input("11111111")).unwrap(),
+            Added::AlreadyThere
+        );
+        assert_eq!(h.read(), before);
+    }
+
+    #[test]
+    fn add_rewrites_a_line_with_a_different_command() {
+        let h = Home::new();
+        let old = format!(
+            "restrict,from=\"10.0.0.0/8\",command=\"/bin/sh\" ssh-ed25519 {BODY} jodd-ai-11111111"
+        );
+        h.write(format!("{old}\n").as_bytes());
+        assert_eq!(
+            add_in(h.path(), uid(), MCP, &input("11111111")).unwrap(),
+            Added::Adopted
+        );
+        assert_eq!(
+            s(&h.read()),
+            format!("{}\n", kit_line_with(",from=\"10.0.0.0/8\""))
+        );
     }
 
     #[test]
