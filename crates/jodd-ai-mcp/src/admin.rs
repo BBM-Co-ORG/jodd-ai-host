@@ -6,12 +6,14 @@
 //!
 //! - `list` (any user): one line per harness, `<name>  enabled|disabled|undecided  <path or ->`.
 //! - `enable`, `disable`, `auto-enable` (root): edit the policy.
-//! - `adopt-keys`, `scan-keys` (the AI account, never root): edit / read the
+//! - `adopt-keys`, `scan-keys`, `add-key` (the AI account, never root; `add-key`
+//!   reads one `<type> <key> jodd-ai-<id>` line from stdin): edit / read the
 //!   account's own `authorized_keys` (root must never write inside its home).
 //!
 //! `main` refuses `admin` under a forced command, so the restricted key never
 //! reaches any of this.
 
+use std::io::Read as _;
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::Path;
 
@@ -33,6 +35,7 @@ usage: jodd-ai-mcp admin <command>
   auto-enable <claude|codex> --path <absolute path> --path-env <PATH>   (root)
   disable <claude|codex>                                                (root)
   adopt-keys | scan-keys                                       (as the AI account)
+  add-key   (one '<type> <key> jodd-ai-<8 hex>' line on stdin)  (as the AI account)
 The jodd-ai-host helper runs these for you: sudo jodd-ai-host enable claude,
 sudo jodd-ai-host adopt-keys, jodd-ai-host doctor.
 ";
@@ -75,14 +78,14 @@ pub fn run(args: &[&str], policy_path: &Path) -> i32 {
             }
             disable(policy_path, h)
         }
-        [cmd @ ("adopt-keys" | "scan-keys")] => {
+        [cmd @ ("adopt-keys" | "scan-keys" | "add-key")] => {
             if uid() == 0 {
                 // Root never touches the account's home; the helper runs these
                 // as the account. scan-keys is read-only: `status` shows it.
-                let next = if *cmd == "adopt-keys" {
-                    "sudo jodd-ai-host adopt-keys"
-                } else {
-                    "jodd-ai-host status"
+                let next = match *cmd {
+                    "adopt-keys" => "sudo jodd-ai-host adopt-keys",
+                    "add-key" => "sudo jodd-ai-host add-key '<type> <key> jodd-ai-<id>'",
+                    _ => "jodd-ai-host status",
                 };
                 eprintln!(
                     "admin {cmd} works on the AI account's own ~/.ssh and must not run as root. \
@@ -90,10 +93,10 @@ pub fn run(args: &[&str], policy_path: &Path) -> i32 {
                 );
                 return FAILED;
             }
-            if *cmd == "adopt-keys" {
-                adopt_keys()
-            } else {
-                scan_keys()
+            match *cmd {
+                "adopt-keys" => adopt_keys(),
+                "add-key" => add_key(),
+                _ => scan_keys(),
             }
         }
         _ => usage(),
@@ -326,6 +329,37 @@ fn adopt_keys() -> i32 {
         }
         Err(e) => {
             eprintln!("Could not adopt the keys: {e}. Run {DOCTOR}");
+            FAILED
+        }
+    }
+}
+
+/// One line from stdin, never from argv or a shell: the key line is data.
+fn add_key() -> i32 {
+    use std::io::BufRead;
+    let mut line = String::new();
+    // A line is at most a few KB; cap the read so a stream cannot fill memory.
+    if let Err(e) = std::io::stdin().lock().take(16 * 1024).read_line(&mut line) {
+        eprintln!("Could not read the key line: {e}");
+        return FAILED;
+    }
+    let line = line.trim_end_matches(['\n', '\r']);
+    let id = line.rsplit(' ').next().unwrap_or("").to_string();
+    match keys::add(&self_path(), line) {
+        Ok(keys::Added::Added) => {
+            println!("Added key {id}.");
+            OK
+        }
+        Ok(keys::Added::AlreadyThere) => {
+            println!("Key {id} is already there.");
+            OK
+        }
+        Ok(keys::Added::Adopted) => {
+            println!("Moved key {id} to jodd-ai-mcp.");
+            OK
+        }
+        Err(e) => {
+            eprintln!("Could not add the key: {e}");
             FAILED
         }
     }

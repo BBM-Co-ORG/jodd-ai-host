@@ -80,6 +80,27 @@ pub fn adopt(mcp_path: &str) -> io::Result<usize> {
     adopt_in(&home()?, euid(), mcp_path)
 }
 
+/// What `add` did.
+#[derive(Debug, PartialEq, Eq)]
+#[allow(clippy::enum_variant_names)] // names fixed by the add-key contract
+pub enum Added {
+    /// A new line was appended.
+    Added,
+    /// The same key was already there as the kit's own line; nothing written.
+    AlreadyThere,
+    /// The same key was there under another command (a legacy wrapper line);
+    /// that line was replaced by the kit's.
+    Adopted,
+}
+
+/// Authorize one device key: write `restrict,command="<mcp_path> --key <id>"
+/// <type> <body> jodd-ai-<id>` (byte-identical to Jodd's `mcp_line_script`).
+/// `line` is `<type> <body> jodd-ai-<8 hex>` with no options, and the kit,
+/// never the caller, composes the restrictions.
+pub fn add(mcp_path: &str, line: &str) -> io::Result<Added> {
+    add_in(&home()?, euid(), mcp_path, line)
+}
+
 fn euid() -> u32 {
     // SAFETY: geteuid has no preconditions and cannot fail.
     unsafe { libc::geteuid() }
@@ -273,7 +294,7 @@ fn scan_in(home: &Path, uid: u32) -> io::Result<Vec<KeyLine>> {
         .collect())
 }
 
-fn adopt_in(home: &Path, uid: u32, mcp_path: &str) -> io::Result<usize> {
+fn check_mcp_path(mcp_path: &str) -> io::Result<()> {
     if !mcp_path.starts_with('/')
         || mcp_path
             .chars()
@@ -284,6 +305,106 @@ fn adopt_in(home: &Path, uid: u32, mcp_path: &str) -> io::Result<usize> {
             format!("{mcp_path:?} is not an absolute path that can sit in a forced command"),
         ));
     }
+    Ok(())
+}
+
+const ADD_USAGE: &str = "usage: jodd-ai-host add-key '<type> <key> jodd-ai-<8 hex>'";
+
+fn add_in(home: &Path, uid: u32, mcp_path: &str, line: &str) -> io::Result<Added> {
+    check_mcp_path(mcp_path)?;
+    let bad = || io::Error::new(io::ErrorKind::InvalidInput, ADD_USAGE);
+    if line.chars().any(char::is_control) {
+        return Err(bad());
+    }
+    let p = parse(line).ok_or_else(bad)?;
+    let id = p
+        .comment
+        .strip_prefix("jodd-ai-")
+        .filter(|id| is_key_id(id.as_bytes()))
+        .ok_or_else(bad)?;
+    if !p.options.is_empty() || !is_key_type(p.key_type) {
+        return Err(bad());
+    }
+    let new = format!(
+        "restrict,command=\"{mcp_path} --key {id}\" {} {} jodd-ai-{id}",
+        p.key_type, p.key_body
+    );
+
+    let file = match read_keys(home, uid)? {
+        Some(f) => f,
+        None => {
+            create_keys_file(home)?;
+            read_keys(home, uid)?.ok_or_else(|| {
+                io::Error::new(io::ErrorKind::NotFound, "authorized_keys vanished")
+            })?
+        }
+    };
+
+    // Classify every existing line for this id.
+    let mut out = Vec::with_capacity(file.bytes.len() + new.len() + 2);
+    let mut replaced = false;
+    for l in lines(&file.bytes) {
+        let (text, end) = split_end(l);
+        let existing = (trailing_id(text) == Some(id))
+            .then(|| std::str::from_utf8(text).ok().and_then(parse))
+            .flatten();
+        let Some(e) = existing else {
+            out.extend_from_slice(l);
+            continue;
+        };
+        if e.key_body != p.key_body {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!(
+                    "a different key is already authorized as jodd-ai-{id}; \
+                     remove it first: sudo jodd-ai-host revoke {id}"
+                ),
+            ));
+        }
+        if e.command.as_deref().is_some_and(is_mcp_command) {
+            return Ok(Added::AlreadyThere);
+        }
+        out.extend_from_slice(new.as_bytes());
+        out.extend_from_slice(end);
+        replaced = true;
+    }
+    if replaced {
+        file.replace(&out)?;
+        return Ok(Added::Adopted);
+    }
+    if !out.is_empty() && !out.ends_with(b"\n") {
+        out.push(b'\n');
+    }
+    out.extend_from_slice(new.as_bytes());
+    out.push(b'\n');
+    file.replace(&out)?;
+    Ok(Added::Added)
+}
+
+/// Make `~/.ssh` (0700) and an empty `authorized_keys` (0600) when missing.
+/// A symlink in either place was already refused by `read_keys`.
+fn create_keys_file(home: &Path) -> io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+    let dir = home.join(".ssh");
+    match fs::symlink_metadata(&dir) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            fs::DirBuilder::new().mode(0o700).create(&dir)?;
+        }
+        r => {
+            r?;
+        }
+    }
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(dir.join("authorized_keys"))?;
+    Ok(())
+}
+
+fn adopt_in(home: &Path, uid: u32, mcp_path: &str) -> io::Result<usize> {
+    check_mcp_path(mcp_path)?;
     let Some(file) = read_keys(home, uid)? else {
         return Ok(0);
     };
@@ -973,6 +1094,136 @@ mod tests {
     fn scan_on_missing_file_is_empty() {
         let h = Home::new();
         assert!(scan_in(h.path(), uid()).unwrap().is_empty());
+    }
+
+    const BODY: &str = "AAAAC3NzaC1lZDI1NTE5AAAAIPhonePhonePhonePhone";
+    fn input(id: &str) -> String {
+        format!("ssh-ed25519 {BODY} jodd-ai-{id}")
+    }
+
+    #[test]
+    fn add_writes_the_kits_line() {
+        let h = Home::new();
+        h.write(format!("{OTHER}\n").as_bytes());
+        assert_eq!(
+            add_in(h.path(), uid(), MCP, &input("11111111")).unwrap(),
+            Added::Added
+        );
+        assert_eq!(
+            s(&h.read()),
+            format!(
+                "{OTHER}\nrestrict,command=\"/usr/local/bin/jodd-ai-mcp --key 11111111\" \
+                 ssh-ed25519 {BODY} jodd-ai-11111111\n"
+            )
+        );
+    }
+
+    #[test]
+    fn add_is_idempotent() {
+        let h = Home::new();
+        add_in(h.path(), uid(), MCP, &input("11111111")).unwrap();
+        let before = h.read();
+        assert_eq!(
+            add_in(h.path(), uid(), MCP, &input("11111111")).unwrap(),
+            Added::AlreadyThere
+        );
+        assert_eq!(h.read(), before);
+    }
+
+    #[test]
+    fn add_adopts_a_legacy_line_for_the_same_key() {
+        let h = Home::new();
+        let legacy_line = format!(
+            "restrict,command=\"{}/.jodd/ai-run-v2 --key 11111111\" ssh-ed25519 {BODY} jodd-ai-11111111",
+            h.path().display()
+        );
+        h.write(format!("{OTHER}\n{legacy_line}\n").as_bytes());
+        assert_eq!(
+            add_in(h.path(), uid(), MCP, &input("11111111")).unwrap(),
+            Added::Adopted
+        );
+        assert_eq!(
+            s(&h.read()),
+            format!(
+                "{OTHER}\nrestrict,command=\"{MCP} --key 11111111\" ssh-ed25519 {BODY} jodd-ai-11111111\n"
+            )
+        );
+    }
+
+    #[test]
+    fn add_refuses_another_key_under_the_same_id() {
+        let h = Home::new();
+        h.write(format!("{}\n", mcp_line("11111111")).as_bytes());
+        let before = h.read();
+        let other = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDifferentDifferent jodd-ai-11111111";
+        let e = add_in(h.path(), uid(), MCP, other).unwrap_err();
+        assert_eq!(e.kind(), io::ErrorKind::AlreadyExists);
+        assert!(
+            e.to_string().contains("sudo jodd-ai-host revoke 11111111"),
+            "{e}"
+        );
+        assert_eq!(h.read(), before);
+    }
+
+    #[test]
+    fn add_refuses_options_and_bad_comments() {
+        let h = Home::new();
+        h.write(format!("{OTHER}\n").as_bytes());
+        let before = h.read();
+        for l in [
+            format!("restrict ssh-ed25519 {BODY} jodd-ai-11111111"),
+            format!("restrict,command=\"/bin/sh\" ssh-ed25519 {BODY} jodd-ai-11111111"),
+            format!("ssh-ed25519 {BODY} jodd-1111"),
+            format!("ssh-ed25519 {BODY} jodd-ai-1111111G"),
+            format!("ssh-ed25519 {BODY} jodd-ai-11111111 extra"),
+            format!("ssh-ed25519 {BODY} jodd-ai-11111111\nssh-ed25519 {BODY} x"),
+            String::new(),
+        ] {
+            let e = add_in(h.path(), uid(), MCP, &l).unwrap_err();
+            assert_eq!(e.kind(), io::ErrorKind::InvalidInput, "{l:?}");
+            assert!(e.to_string().contains("usage: jodd-ai-host add-key"), "{e}");
+        }
+        assert_eq!(h.read(), before);
+    }
+
+    #[test]
+    fn add_creates_ssh_dir_and_file_with_owner_only_modes() {
+        let home = tempfile::tempdir().unwrap();
+        add_in(home.path(), uid(), MCP, &input("22222222")).unwrap();
+        let mode = |p: PathBuf| fs::metadata(p).unwrap().mode() & 0o777;
+        assert_eq!(mode(home.path().join(".ssh")), 0o700);
+        assert_eq!(mode(home.path().join(".ssh/authorized_keys")), 0o600);
+        // A home with ~/.ssh but no file.
+        let h = Home::new();
+        add_in(h.path(), uid(), MCP, &input("22222222")).unwrap();
+        assert_eq!(mode(h.keys()), 0o600);
+    }
+
+    #[test]
+    fn add_keeps_a_last_line_without_newline() {
+        let h = Home::new();
+        h.write(OTHER.as_bytes());
+        add_in(h.path(), uid(), MCP, &input("11111111")).unwrap();
+        let got = s(&h.read());
+        assert!(got.starts_with(&format!("{OTHER}\nrestrict,")), "{got}");
+        assert!(got.ends_with("jodd-ai-11111111\n"));
+    }
+
+    #[test]
+    fn add_refuses_a_symlinked_ssh_dir() {
+        let home = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(elsewhere.path(), home.path().join(".ssh")).unwrap();
+        let e = add_in(home.path(), uid(), MCP, &input("11111111")).unwrap_err();
+        assert!(e.to_string().contains("symlink"), "{e}");
+        assert_eq!(fs::read_dir(elsewhere.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn add_refuses_a_bad_mcp_path() {
+        let h = Home::new();
+        assert!(add_in(h.path(), uid(), "relative", &input("11111111")).is_err());
+        assert!(!h.keys().exists());
     }
 
     #[test]
